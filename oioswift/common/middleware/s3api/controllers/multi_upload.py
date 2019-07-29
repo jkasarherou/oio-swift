@@ -411,7 +411,7 @@ class UploadsController(Controller):
 
         orig_container = req.container_name
         seg_container = orig_container + MULTIUPLOAD_SUFFIX
-        
+
         try:
             req.get_response(self.app, 'PUT', seg_container, '')
         except (BucketAlreadyExists, BucketAlreadyOwnedByYou):

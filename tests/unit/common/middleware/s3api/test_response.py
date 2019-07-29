@@ -15,8 +15,10 @@
 
 import unittest
 
+from swift.common.header_key_dict import HeaderKeyDict
 from swift.common.swob import Response
 from oioswift.common.middleware.s3api.response import Response as S3Response
+from oioswift.common.middleware.s3api.utils import sysmeta_prefix
 
 
 class TestRequest(unittest.TestCase):
@@ -24,9 +26,35 @@ class TestRequest(unittest.TestCase):
         for expected, header_vals in \
                 ((True, ('true', '1')), (False, ('false', 'ugahhh', None))):
             for val in header_vals:
-                resp = Response(headers={'X-Static-Large-Object': val})
+                resp = Response(headers={'X-Static-Large-Object': val,
+                                         'Etag': 'foo'})
                 s3resp = S3Response.from_swift_resp(resp)
                 self.assertEqual(expected, s3resp.is_slo)
+                if s3resp.is_slo:
+                    self.assertEqual('"foo-N"', s3resp.headers['ETag'])
+                else:
+                    self.assertEqual('"foo"', s3resp.headers['ETag'])
+
+    def test_response_s3api_sysmeta_headers(self):
+        for _type in ('object', 'container'):
+            sw_headers = HeaderKeyDict(
+                {sysmeta_prefix(_type) + 'foo': 'bar'})
+            resp = Response(headers=sw_headers)
+            s3resp = S3Response.from_swift_resp(resp)
+            self.assertEqual(sw_headers, s3resp.sysmeta_headers)
+
+    def test_response_s3api_sysmeta_headers_ignore_other(self):
+        for _type in ('object', 'container'):
+            sw_headers = HeaderKeyDict(
+                {'x-{}-sysmeta-foo-s3api'.format(_type): 'bar',
+                 sysmeta_prefix(_type) + 'foo': 'bar'})
+            resp = Response(headers=sw_headers)
+            s3resp = S3Response.from_swift_resp(resp)
+            expected_headers = HeaderKeyDict(
+                {sysmeta_prefix(_type) + 'foo': 'bar'})
+            self.assertEqual(expected_headers, s3resp.sysmeta_headers)
+            self.assertIn('x-{}-sysmeta-foo-s3api'.format(_type),
+                          s3resp.sw_headers)
 
 
 if __name__ == '__main__':

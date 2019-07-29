@@ -652,7 +652,8 @@ class TestS3Bucket(S3TestCase):
 
         with mock.patch('oioswift.common.middleware.s3api.'
                         'request.get_container_info',
-                        return_value={'sysmeta': {'swift3-acl': '{"Owner": "other"}'}}):
+                        return_value={
+                            'sysmeta': {'swift3-acl': '{"Owner": "other"}'}}):
             code = self._test_method_error('PUT', '/bucket', swob.HTTPAccepted)
         self.assertEqual(code, 'BucketAlreadyExists')
 
