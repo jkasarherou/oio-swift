@@ -53,9 +53,11 @@ class FakeSwift(object):
         env['REMOTE_USER'] = 'authorized'
 
         if env['REQUEST_METHOD'] == 'TEST':
-            # AccessDenied by default at s3acl authenticate
-            env['swift.authorize'] = \
-                lambda req: swob.HTTPForbidden(request=req)
+            def authorize_cb(req):
+                req.environ.setdefault('swift_owner', True)
+                return swob.HTTPForbidden(request=req)
+
+            env['swift.authorize'] = authorize_cb
         else:
             env['swift.authorize'] = lambda req: None
 

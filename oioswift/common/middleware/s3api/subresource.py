@@ -19,8 +19,9 @@ from swift.common.utils import json
 
 from oioswift.common.middleware.s3api.response import InvalidArgument, \
     MalformedACLError, S3NotImplemented, InvalidRequest, AccessDenied
-from oioswift.common.middleware.s3api.etree import Element, SubElement
-from oioswift.common.middleware.s3api.utils import LOGGER, sysmeta_header
+from oioswift.common.middleware.s3api.etree import Element, SubElement, \
+    tostring
+from oioswift.common.middleware.s3api.utils import sysmeta_header
 from oioswift.common.middleware.s3api.cfg import CONF
 from oioswift.common.middleware.s3api.exception import InvalidSubresource
 
@@ -119,10 +120,7 @@ def decode_acl(resource, headers):
                 grants.append(Grant(grantee, permission))
         return ACL(Owner(id, name), grants)
     except Exception as e:
-        LOGGER.debug(e)
-        pass
-
-    raise InvalidSubresource((resource, 'acl', value))
+        raise InvalidSubresource((resource, 'acl', value), e)
 
 
 class Grantee(object):
@@ -406,6 +404,12 @@ class ACL(object):
         """
         self.owner = owner
         self.grants = grants
+
+    def __bytes__(self):
+        return tostring(self.elem())
+
+    def __repr__(self):
+        return self.__bytes__()
 
     @classmethod
     def from_elem(cls, elem):

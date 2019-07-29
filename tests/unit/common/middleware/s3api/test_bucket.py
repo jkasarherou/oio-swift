@@ -15,6 +15,7 @@
 
 import unittest
 import cgi
+import mock
 
 from swift.common import swob
 from swift.common.middleware.versioned_writes import DELETE_MARKER_CONTENT_TYPE
@@ -647,7 +648,14 @@ class TestS3Bucket(S3TestCase):
         code = self._test_method_error('PUT', '/bucket', swob.HTTPForbidden)
         self.assertEqual(code, 'AccessDenied')
         code = self._test_method_error('PUT', '/bucket', swob.HTTPAccepted)
+        self.assertEqual(code, 'BucketAlreadyOwnedByYou')
+
+        with mock.patch('oioswift.common.middleware.s3api.'
+                        'request.get_container_info',
+                        return_value={'sysmeta': {'swift3-acl': '{"Owner": "other"}'}}):
+            code = self._test_method_error('PUT', '/bucket', swob.HTTPAccepted)
         self.assertEqual(code, 'BucketAlreadyExists')
+
         code = self._test_method_error('PUT', '/bucket', swob.HTTPServerError)
         self.assertEqual(code, 'InternalError')
         code = self._test_method_error(
@@ -670,6 +678,26 @@ class TestS3Bucket(S3TestCase):
             'PUT', '/%s' % ''.join(['b' for x in xrange(64)]),
             swob.HTTPCreated)
         self.assertEqual(code, 'InvalidBucketName')
+
+    @s3acl(s3acl_only=True)
+    def test_bucket_PUT_error_non_swift_owner(self):
+        code = self._test_method_error(
+            'PUT', '/bucket', swob.HTTPAccepted, env={'swift_owner': False})
+        self.assertEqual(code, 'AccessDenied')
+
+    @s3acl(s3acl_only=True)
+    def test_bucket_PUT_bucket_already_owned_by_you(self):
+        self.swift.register(
+            'PUT', '/v1/AUTH_test/bucket', swob.HTTPAccepted,
+            {'X-Container-Object-Count': 0}, None)
+        req = Request.blank(
+            '/bucket',
+            environ={'REQUEST_METHOD': 'PUT'},
+            headers={'Authorization': 'AWS test:tester:hmac',
+                     'Date': self.get_date_header()})
+        status, headers, body = self.call_s3api(req)
+        self.assertEqual(status, '409 Conflict')
+        self.assertIn(b'BucketAlreadyOwnedByYou', body)
 
     @s3acl
     def test_bucket_PUT(self):

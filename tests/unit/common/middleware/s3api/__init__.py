@@ -89,7 +89,8 @@ class S3TestCase(unittest.TestCase):
         elem = fromstring(body, 'Error')
         return elem.find('./Message').text
 
-    def _test_method_error(self, method, path, response_class, headers={}):
+    def _test_method_error(self, method, path, response_class, headers={},
+                           env={}):
         if not path.startswith('/'):
             path = '/' + path  # add a missing slash before the path
 
@@ -100,8 +101,8 @@ class S3TestCase(unittest.TestCase):
         self.swift.register(method, uri, response_class, headers, None)
         headers.update({'Authorization': 'AWS test:tester:hmac',
                         'Date': self.get_date_header()})
-        req = swob.Request.blank(path, environ={'REQUEST_METHOD': method},
-                                 headers=headers)
+        env.update({'REQUEST_METHOD': method})
+        req = swob.Request.blank(path, environ=env, headers=headers)
         status, headers, body = self.call_s3api(req)
         return self._get_error_code(body)
 
@@ -118,16 +119,14 @@ class S3TestCase(unittest.TestCase):
 
         req.headers.setdefault("User-Agent", "Mozzarella Foxfire")
 
-        class StartResponseContext(object):
-            status = headers = None
+        status = [None]
+        headers = [None]
 
-            def __call__(self, s, h, ei=None):
-                self.status = s
-                self.headers = swob.HeaderKeyDict(h)
+        def start_response(s, h, ei=None):
+            status[0] = s
+            headers[0] = swob.HeaderKeyDict(h)
 
-        sr = StartResponseContext()
-
-        body_iter = app(req.environ, sr)
+        body_iter = app(req.environ, start_response)
         body = ''
         caught_exc = None
         try:
@@ -140,9 +139,9 @@ class S3TestCase(unittest.TestCase):
                 raise
 
         if expect_exception:
-            return sr.status, sr.headers, body, caught_exc
+            return status[0], headers[0], body, caught_exc
         else:
-            return sr.status, sr.headers, body
+            return status[0], headers[0], body
 
     def call_s3api(self, req, **kwargs):
         return self.call_app(req, app=self.s3api, **kwargs)

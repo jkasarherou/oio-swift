@@ -60,7 +60,8 @@ from oioswift.common.middleware.s3api.controllers.base import Controller, \
 from oioswift.common.middleware.s3api.response import InvalidArgument, \
     ErrorResponse, MalformedXML, InvalidPart, BucketAlreadyExists, \
     EntityTooSmall, InvalidPartOrder, InvalidRequest, HTTPOk, HTTPNoContent, \
-    NoSuchKey, NoSuchUpload, NoSuchBucket, InvalidRange
+    NoSuchKey, NoSuchUpload, NoSuchBucket, InvalidRange, \
+    BucketAlreadyOwnedByYou
 from oioswift.common.middleware.s3api.utils import LOGGER, unique_id, \
     MULTIUPLOAD_SUFFIX, S3Timestamp, extract_s3_etag
 from oioswift.common.middleware.s3api.etree import Element, SubElement, \
@@ -408,18 +409,22 @@ class UploadsController(Controller):
         # Create a unique S3 upload id from UUID to avoid duplicates.
         upload_id = unique_id()
 
-        container = req.container_name + MULTIUPLOAD_SUFFIX
+        orig_container = req.container_name
+        seg_container = orig_container + MULTIUPLOAD_SUFFIX
+        
         try:
-            req.get_response(self.app, 'PUT', container, '')
-        except BucketAlreadyExists:
+            req.get_response(self.app, 'PUT', seg_container, '')
+        except (BucketAlreadyExists, BucketAlreadyOwnedByYou):
             pass
+        finally:
+            req.container_name = orig_container
 
         obj = '%s/%s' % (req.object_name, upload_id)
 
         req.headers.pop('Etag', None)
         req.headers.pop('Content-Md5', None)
 
-        req.get_response(self.app, 'PUT', container, obj, body='')
+        req.get_response(self.app, 'PUT', seg_container, obj, body='')
 
         result_elem = Element('InitiateMultipartUploadResult')
         SubElement(result_elem, 'Bucket').text = req.container_name

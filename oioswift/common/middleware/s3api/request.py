@@ -23,7 +23,7 @@ import string
 from urllib import quote, unquote
 from six.moves.urllib.parse import parse_qsl
 
-from swift.common.utils import split_path
+from swift.common.utils import split_path, json
 from swift.common import swob
 from swift.common.http import HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED, \
     HTTP_NO_CONTENT, HTTP_UNAUTHORIZED, HTTP_FORBIDDEN, HTTP_NOT_FOUND, \
@@ -51,7 +51,7 @@ from oioswift.common.middleware.s3api.response import AccessDenied, \
     InvalidStorageClass, S3NotImplemented, InvalidURI, MalformedXML, \
     InvalidRequest, RequestTimeout, InvalidBucketName, BadDigest, \
     AuthorizationHeaderMalformed, AuthorizationQueryParametersError, \
-    ServiceUnavailable, BadRequest, MethodNotAllowed
+    ServiceUnavailable, BadRequest, MethodNotAllowed, BucketAlreadyOwnedByYou
 from oioswift.common.middleware.s3api.exception import NotS3Request
 from oioswift.common.middleware.s3api.utils import utf8encode, LOGGER, \
     check_path_header, S3Timestamp, mktime, MULTIUPLOAD_SUFFIX, \
@@ -1123,6 +1123,19 @@ class Request(swob.Request):
 
         return code_map[method]
 
+    def _bucket_put_accepted_error(self, container, app):
+        sw_req = self.to_swift_req('HEAD', container, None)
+        info = get_container_info(sw_req.environ, app)
+        sysmeta = info.get('sysmeta', {})
+        try:
+            acl = json.loads(sysmeta.get('swift3-acl', '{}'))
+            owner = acl.get('Owner')
+        except (ValueError, TypeError, KeyError):
+            owner = None
+        if owner is None or owner == self.user_id:
+            raise BucketAlreadyOwnedByYou(container)
+        raise BucketAlreadyExists(container)
+
     def _swift_error_codes(self, method, container, obj, env, app):
         """
         Returns a dict from expected Swift error codes to the corresponding S3
@@ -1145,7 +1158,8 @@ class Request(swob.Request):
                 },
                 'PUT': {
                     HTTP_NO_CONTENT: (BucketAlreadyExists, container),
-                    HTTP_ACCEPTED: (BucketAlreadyExists, container),
+                    HTTP_ACCEPTED: (self._bucket_put_accepted_error, container,
+                                    app),
                 },
                 'POST': {
                     HTTP_NOT_FOUND: (NoSuchBucket, container),
@@ -1374,8 +1388,10 @@ class Request(swob.Request):
         else:
             # otherwise we do naive HEAD request with the authentication
             resp = self.get_response(app, 'HEAD', self.container_name, '')
+            headers = resp.sw_headers.copy()
+            headers.update(resp.sysmeta_headers)
             return headers_to_container_info(
-                resp.sw_headers, resp.status_int)  # pylint: disable-msg=E1101
+                headers, resp.status_int)  # pylint: disable-msg=E1101
 
     def get_object_info(self, app, container_name=None, object_name=None):
         if container_name is None:
@@ -1440,6 +1456,9 @@ class S3AclRequest(Request):
         else:
             # tempauth
             self.user_id = self.access_key
+
+        sw_req.environ.get('swift.authorize', lambda req: None)(sw_req)
+        self.environ['swift_owner'] = sw_req.environ.get('swift_owner', False)
 
         # Need to skip S3 authorization on subsequent requests to prevent
         # overwriting the account in PATH_INFO
