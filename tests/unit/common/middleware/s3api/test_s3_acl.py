@@ -66,9 +66,10 @@ def s3acl(func=None, s3acl_only=False):
                 exc_type, exc_instance, exc_traceback = sys.exc_info()
                 formatted_traceback = ''.join(traceback.format_tb(
                     exc_traceback))
-                message = '\n%s\n%s:\n%s' % (formatted_traceback,
-                                             exc_type.__name__,
-                                             exc_instance.message)
+                message = '\n%s\n%s' % (formatted_traceback,
+                                        exc_type.__name__)
+                if exc_instance.args:
+                    message += ':\n%s' % (exc_instance.args[0],)
                 message += failing_point
                 raise exc_type(message)
 

@@ -38,33 +38,28 @@ class TestS3Bucket(S3TestCase):
                         ('viola', '2011-01-05T02:19:14.275290', '0', 3909),
                         ('lily', '2011-01-05T02:19:14.275290', '0', '3909'),
                         ('with space', '2011-01-05T02:19:14.275290', 0, 390),
-                        ('with%20space', '2011-01-05T02:19:14.275290', 0, 390))
+                        ('with%20space', '2011-01-05T02:19:14.275290', 0, 390),
+                        (u'z-\u062a', '2011-01-05T02:19:14.275290', 0, 390))
 
-        objects = map(
-            lambda item: {'name': str(item[0]), 'last_modified': str(item[1]),
-                          'hash': str(item[2]), 'bytes': str(item[3])},
-            list(self.objects))
+        objects = [
+            {'name': item[0], 'last_modified': str(item[1]),
+             'hash': str(item[2]), 'bytes': str(item[3])}
+            for item in self.objects]
         object_list = json.dumps(objects)
 
         self.prefixes = ['rose', 'viola', 'lily']
-        object_list_subdir = []
-        for p in self.prefixes:
-            object_list_subdir.append({"subdir": p})
+        object_list_subdir = [{'subdir': p} for p in self.prefixes]
 
         self.swift.register('DELETE', '/v1/AUTH_test/bucket+segments',
                             swob.HTTPNoContent, {}, json.dumps([]))
-        self.swift.register('DELETE', '/v1/AUTH_test/bucket+segments/rose',
-                            swob.HTTPNoContent, {}, json.dumps([]))
-        self.swift.register('DELETE', '/v1/AUTH_test/bucket+segments/viola',
-                            swob.HTTPNoContent, {}, json.dumps([]))
-        self.swift.register('DELETE', '/v1/AUTH_test/bucket+segments/lily',
-                            swob.HTTPNoContent, {}, json.dumps([]))
-        self.swift.register('DELETE', '/v1/AUTH_test/bucket+segments/with'
-                            ' space', swob.HTTPNoContent, {}, json.dumps([]))
-        self.swift.register('DELETE', '/v1/AUTH_test/bucket+segments/with%20'
-                            'space', swob.HTTPNoContent, {}, json.dumps([]))
+        for name, _, _, _ in self.objects:
+            self.swift.register(
+                'DELETE',
+                '/v1/AUTH_test/bucket+segments/' + name.encode('utf-8'),
+                swob.HTTPNoContent, {}, json.dumps([]))
+
         self.swift.register('GET', '/v1/AUTH_test/bucket+segments?format=json'
-                            '&marker=with%2520space', swob.HTTPOk, {},
+                            '&marker=z-%D8%AA', swob.HTTPOk, {},
                             json.dumps([]))
         self.swift.register('GET', '/v1/AUTH_test/bucket+segments?format=json'
                             '&marker=', swob.HTTPOk, {}, object_list)
@@ -85,7 +80,7 @@ class TestS3Bucket(S3TestCase):
             '/v1/AUTH_test/subdirs?delimiter=/&format=json&limit=3',
             swob.HTTPOk, {}, json.dumps([
                 {'subdir': 'nothing/'},
-                {'subdir': 'but/'},
+                {'subdir': u'but-\u062a/'},
                 {'subdir': 'subdirs/'},
             ]))
 
@@ -152,16 +147,14 @@ class TestS3Bucket(S3TestCase):
 
         objects = elem.iterchildren('Contents')
 
-        names = []
+        items = []
         for o in objects:
-            names.append(o.find('./Key').text)
+            items.append((o.find('./Key').text, o.find('./ETag').text))
             self.assertEqual('2011-01-05T02:19:14.275Z',
                              o.find('./LastModified').text)
-            self.assertEqual('"0"', o.find('./ETag').text)
-
-        self.assertEqual(len(names), len(self.objects))
-        for i in self.objects:
-            self.assertTrue(i[0] in names)
+        self.assertEqual(items, [
+            (i[0].encode('utf-8'), '"0"')
+            for i in self.objects])
 
     def test_bucket_GET_subdir(self):
         bucket_name = 'junk-subdir'
@@ -184,7 +177,8 @@ class TestS3Bucket(S3TestCase):
     def test_bucket_GET_is_truncated(self):
         bucket_name = 'junk'
 
-        req = Request.blank('/%s?max-keys=5' % bucket_name,
+        req = Request.blank('/%s?max-keys=%d' %
+                            (bucket_name, len(self.objects)),
                             environ={'REQUEST_METHOD': 'GET'},
                             headers={'Authorization': 'AWS test:tester:hmac',
                                      'Date': self.get_date_header()})
@@ -192,7 +186,8 @@ class TestS3Bucket(S3TestCase):
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./IsTruncated').text, 'false')
 
-        req = Request.blank('/%s?max-keys=4' % bucket_name,
+        req = Request.blank('/%s?max-keys=%d' %
+                            (bucket_name, len(self.objects) - 1),
                             environ={'REQUEST_METHOD': 'GET'},
                             headers={'Authorization': 'AWS test:tester:hmac',
                                      'Date': self.get_date_header()})
@@ -207,29 +202,32 @@ class TestS3Bucket(S3TestCase):
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./IsTruncated').text, 'true')
-        self.assertEqual(elem.find('./NextMarker').text, 'but/')
+        self.assertEqual(elem.find('./NextMarker').text,
+                         u'but-\u062a/'.encode('utf-8'))
 
     def test_bucket_GET_v2_is_truncated(self):
         bucket_name = 'junk'
 
-        req = Request.blank('/%s?list-type=2&max-keys=5' % bucket_name,
+        req = Request.blank('/%s?list-type=2&max-keys=%d' %
+                            (bucket_name, len(self.objects)),
                             environ={'REQUEST_METHOD': 'GET'},
                             headers={'Authorization': 'AWS test:tester:hmac',
                                      'Date': self.get_date_header()})
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
-        self.assertEqual(elem.find('./KeyCount').text, '5')
+        self.assertEqual(elem.find('./KeyCount').text, str(len(self.objects)))
         self.assertEqual(elem.find('./IsTruncated').text, 'false')
 
-        req = Request.blank('/%s?list-type=2&max-keys=4' % bucket_name,
+        req = Request.blank('/%s?list-type=2&max-keys=%d' %
+                            (bucket_name, len(self.objects) - 1),
                             environ={'REQUEST_METHOD': 'GET'},
                             headers={'Authorization': 'AWS test:tester:hmac',
                                      'Date': self.get_date_header()})
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
-        self.assertEqual(elem.find('./NextContinuationToken').text,
-                         'd2l0aCBzcGFjZQ==')
-        self.assertEqual(elem.find('./KeyCount').text, '4')
+        self.assertIsNotNone(elem.find('./NextContinuationToken').text)
+        self.assertEqual(elem.find('./KeyCount').text,
+                         str(len(self.objects) - 1))
         self.assertEqual(elem.find('./IsTruncated').text, 'true')
 
         req = Request.blank('/subdirs?list-type=2&delimiter=/&max-keys=2',
@@ -238,7 +236,7 @@ class TestS3Bucket(S3TestCase):
                                      'Date': self.get_date_header()})
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
-        self.assertEqual(elem.find('./NextContinuationToken').text, 'YnV0Lw==')
+        self.assertIsNotNone(elem.find('./NextContinuationToken').text)
         self.assertEqual(elem.find('./KeyCount').text, '2')
         self.assertEqual(elem.find('./IsTruncated').text, 'true')
 
@@ -467,9 +465,12 @@ class TestS3Bucket(S3TestCase):
     def test_bucket_GET_with_versions_versioning_not_configured(self):
         self.swift.register('GET', '/v1/AUTH_test/junk+versioning',
                             swob.HTTPNotFound, {}, None)
-        for obj in self.objects:
-            self.swift.register('HEAD', '/v1/AUTH_test/junk/%s' % obj[0],
-                                swob.HTTPOk, {}, None)
+        for name, _, _, _ in self.objects:
+            self.swift.register(
+                'HEAD',
+                '/v1/AUTH_test/junk/' +
+                name.encode('utf-8'),
+                swob.HTTPOk, {}, None)
         self.swift.register('HEAD', '/v1/AUTH_test/junk/viola',
                             swob.HTTPOk, {}, None)
 
@@ -493,7 +494,7 @@ class TestS3Bucket(S3TestCase):
         objects.sort(key=lambda o: o[0])
         self.assertEqual(len(versions), len(objects))
         self.assertEqual([v.find('./Key').text for v in versions],
-                         [v[0] for v in objects])
+                         [v[0].encode('utf-8') for v in objects])
         self.assertEqual([v.find('./IsLatest').text for v in versions],
                          ['true' for v in objects])
         self.assertEqual([v.find('./VersionId').text for v in versions],
@@ -503,7 +504,7 @@ class TestS3Bucket(S3TestCase):
         self.assertEqual([v.find('./LastModified').text for v in versions],
                          [v[1][:-3] + 'Z' for v in objects])
         self.assertEqual([v.find('./ETag').text for v in versions],
-                         ['"%s"' % v[2] for v in objects])
+                         ['"0"' for v in objects])
         self.assertEqual([v.find('./Size').text for v in versions],
                          [str(v[3]) for v in objects])
         self.assertEqual([v.find('./Owner/ID').text for v in versions],
@@ -524,13 +525,15 @@ class TestS3Bucket(S3TestCase):
         ]
         self.swift.register('GET', '/v1/AUTH_test/junk+versioning',
                             swob.HTTPOk, {}, json.dumps(versioned_objects))
-        for obj in self.objects:
-            if obj[0] == 'rose':
+        for name, _, _, _ in self.objects:
+            if name == 'rose':
                 headers = {'X-Object-Sysmeta-Version-Id': '3'}
             else:
                 headers = {}
-            self.swift.register('HEAD', '/v1/AUTH_test/junk/%s' % obj[0],
-                                swob.HTTPOk, headers, None)
+            self.swift.register(
+                'HEAD',
+                '/v1/AUTH_test/junk/' + name.encode('utf-8'),
+                swob.HTTPOk, headers, None)
 
         req = Request.blank('/junk?versions',
                             environ={'REQUEST_METHOD': 'GET'},

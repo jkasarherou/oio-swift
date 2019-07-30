@@ -78,7 +78,7 @@ class BucketController(Controller):
                     except InternalError:
                         raise ServiceUnavailable()
                 if segments:
-                    marker = seg['name']
+                    marker = seg['name'].encode('utf-8')
                 else:
                     break
             req.get_response(self.app, 'DELETE', container)

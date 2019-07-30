@@ -20,8 +20,7 @@ import hmac
 import re
 import six
 import string
-from urllib import quote, unquote
-from six.moves.urllib.parse import parse_qsl
+from six.moves.urllib.parse import quote, unquote, parse_qsl
 
 from swift.common.utils import split_path, json
 from swift.common import swob
