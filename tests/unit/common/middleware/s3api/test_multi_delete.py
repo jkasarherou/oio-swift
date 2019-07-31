@@ -20,7 +20,6 @@ from datetime import datetime
 from hashlib import md5
 
 
-from six.moves import urllib
 from swift.common import swob
 from swift.common.swob import Request
 
@@ -41,21 +40,32 @@ class TestS3MultiDelete(S3TestCase):
         self.swift.register('HEAD', '/v1/AUTH_test/bucket/Key2',
                             swob.HTTPNotFound, {}, None)
 
+    def get_request(self, path, body):
+        content_md5 = base64.b64encode(md5(body).digest()).strip()
+        headers = {
+            'Authorization': 'AWS test:tester:hmac',
+            'Date': self.get_date_header(),
+            'Content-MD5': content_md5
+        }
+        return Request.blank(
+            path,
+            environ={'REQUEST_METHOD': 'POST'},
+            headers=headers,
+            body=body)
+
+    def get_delete_object_request(self, body):
+        return self.get_request('/bucket/object?delete', body)
+
+    def get_delete_bucket_request(self, body):
+        return self.get_request('/bucket?delete', body)
+
     @s3acl
     def test_object_multi_DELETE_to_object(self):
         elem = Element('Delete')
         obj = SubElement(elem, 'Object')
         SubElement(obj, 'Key').text = 'object'
         body = tostring(elem, use_s3ns=False)
-        content_md5 = base64.b64encode(md5(body).digest()).strip()
-
-        req = Request.blank('/bucket/object?delete',
-                            environ={'REQUEST_METHOD': 'POST'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'Content-MD5': content_md5},
-                            body=body)
-
+        req = self.get_delete_object_request(body)
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
 
@@ -84,15 +94,8 @@ class TestS3MultiDelete(S3TestCase):
             obj = SubElement(elem, 'Object')
             SubElement(obj, 'Key').text = key
         body = tostring(elem, use_s3ns=False)
-        content_md5 = base64.b64encode(md5(body).digest()).strip()
-
-        req = Request.blank('/bucket?delete',
-                            environ={'REQUEST_METHOD': 'POST'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Content-Type': 'multipart/form-data',
-                                     'Date': self.get_date_header(),
-                                     'Content-MD5': content_md5},
-                            body=body)
+        req = self.get_delete_bucket_request(body)
+        req.content_type = 'multipart/form-data'
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
 
@@ -120,14 +123,7 @@ class TestS3MultiDelete(S3TestCase):
             obj = SubElement(elem, 'Object')
             SubElement(obj, 'Key').text = key
         body = tostring(elem, use_s3ns=False)
-        content_md5 = md5(body).digest().encode('base64').strip()
-
-        req = Request.blank('/bucket?delete',
-                            environ={'REQUEST_METHOD': 'POST'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'Content-MD5': content_md5},
-                            body=body)
+        req = self.get_delete_bucket_request(body)
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
 
@@ -147,14 +143,7 @@ class TestS3MultiDelete(S3TestCase):
             obj = SubElement(elem, 'Object')
             SubElement(obj, 'Key')
         body = tostring(elem, use_s3ns=False)
-        content_md5 = md5(body).digest().encode('base64').strip()
-
-        req = Request.blank('/bucket?delete',
-                            environ={'REQUEST_METHOD': 'POST'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'Content-MD5': content_md5},
-                            body=body)
+        req = self.get_delete_bucket_request(body)
         status, headers, body = self.call_s3api(req)
         self.assertEqual(self._get_error_code(body), 'UserKeyMustBeSpecified')
 
@@ -166,12 +155,8 @@ class TestS3MultiDelete(S3TestCase):
             SubElement(obj, 'Key').text = key
         body = tostring(elem, use_s3ns=False)
 
-        req = Request.blank('/bucket?delete',
-                            environ={'REQUEST_METHOD': 'POST'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'Content-MD5': 'XXXX'},
-                            body=body)
+        req = self.get_delete_bucket_request(body)
+        req.headers['Content-MD5'] = 'XXXX'
         status, headers, body = self.call_s3api(req)
         self.assertEqual(self._get_error_code(body), 'InvalidDigest')
 
@@ -182,12 +167,8 @@ class TestS3MultiDelete(S3TestCase):
             obj = SubElement(elem, 'Object')
             SubElement(obj, 'Key').text = key
         body = tostring(elem, use_s3ns=False)
-
-        req = Request.blank('/bucket?delete',
-                            environ={'REQUEST_METHOD': 'POST'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()},
-                            body=body)
+        req = self.get_delete_bucket_request(body)
+        req.headers.pop('Content-MD5')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(self._get_error_code(body), 'InvalidRequest')
 
@@ -201,14 +182,7 @@ class TestS3MultiDelete(S3TestCase):
             obj = SubElement(elem, 'Object')
             SubElement(obj, 'Key').text = name
         body = tostring(elem, use_s3ns=False)
-        content_md5 = md5(body).digest().encode('base64').strip()
-
-        req = Request.blank('/bucket?delete',
-                            environ={'REQUEST_METHOD': 'POST'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'Content-MD5': content_md5},
-                            body=body)
+        req = self.get_delete_bucket_request(body)
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
         elem = fromstring(body)
@@ -222,14 +196,7 @@ class TestS3MultiDelete(S3TestCase):
             obj = SubElement(elem, 'Object')
             SubElement(obj, 'Key').text = 'x' * 1000 + str(i)
         body = tostring(elem, use_s3ns=False)
-        content_md5 = md5(body).digest().encode('base64').strip()
-
-        req = Request.blank('/bucket?delete',
-                            environ={'REQUEST_METHOD': 'POST'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'Content-MD5': content_md5},
-                            body=body)
+        req = self.get_delete_bucket_request(body)
         status, headers, body = self.call_s3api(req)
         self.assertEqual(self._get_error_code(body), 'MalformedXML')
 
@@ -247,14 +214,8 @@ class TestS3MultiDelete(S3TestCase):
             obj = SubElement(elem, 'Object')
             SubElement(obj, 'Key').text = key
         body = tostring(elem, use_s3ns=False)
-        content_md5 = base64.b64encode(md5(body).digest()).strip()
-
-        req = Request.blank('/bucket?delete',
-                            environ={'REQUEST_METHOD': 'POST'},
-                            headers={'Authorization': 'AWS %s:hmac' % account,
-                                     'Date': self.get_date_header(),
-                                     'Content-MD5': content_md5},
-                            body=body)
+        req = self.get_delete_bucket_request(body)
+        req.headers['Authorization'] = 'AWS %s:hmac' % account
         req.date = datetime.now()
         req.content_type = 'text/plain'
 
