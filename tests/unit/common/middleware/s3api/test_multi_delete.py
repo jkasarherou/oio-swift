@@ -148,6 +148,25 @@ class TestS3MultiDelete(S3TestCase):
         self.assertEqual(self._get_error_code(body), 'UserKeyMustBeSpecified')
 
     @s3acl
+    def test_object_multi_DELETE_versioned(self):
+        self.swift.register('DELETE', '/v1/AUTH_test/bucket/Key1',
+                            swob.HTTPNoContent, {}, None)
+        self.swift.register('DELETE', '/v1/AUTH_test/bucket/Key2',
+                            swob.HTTPNotFound, {}, None)
+
+        elem = Element('Delete')
+        SubElement(elem, 'Quiet').text = 'true'
+        for key in ['Key1', 'Key2']:
+            obj = SubElement(elem, 'Object')
+            SubElement(obj, 'Key').text = key
+            SubElement(obj, 'VersionId').text = 'not-supported'
+
+        body = tostring(elem, use_s3ns=False)
+        req = self.get_delete_bucket_request(body)
+        status, headers, body = self.call_s3api(req)
+        self.assertEqual(self._get_error_code(body), 'NotImplemented')
+
+    @s3acl
     def test_object_multi_DELETE_with_invalid_md5(self):
         elem = Element('Delete')
         for key in ['Key1', 'Key2']:
