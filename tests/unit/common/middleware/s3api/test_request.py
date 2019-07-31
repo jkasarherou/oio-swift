@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from contextlib import nested
 from mock import patch, MagicMock
 import unittest
 
@@ -95,30 +94,35 @@ class TestRequest(S3TestCase):
     def tearDown(self):
         CONF.s3_acl = False
 
+    def get_request(self, path, method):
+        req = Request.blank(
+            path,
+            environ={'REQUEST_METHOD': method},
+            headers={'Authorization': 'AWS test:tester:hmac',
+                     'Date': self.get_date_header()})
+        return req
+
     @patch('oioswift.common.middleware.s3api.'
            'acl_handlers.ACL_MAP', Fake_ACL_MAP)
     @patch('oioswift.common.middleware.s3api.'
            'request.S3AclRequest.authenticate', lambda x, y: None)
     def _test_get_response(self, method, container='bucket', obj=None,
-                           permission=None, skip_check=False,
                            req_klass=S3_Request, fake_swift_resp=None):
         path = '/' + container + ('/' + obj if obj else '')
-        req = Request.blank(path,
-                            environ={'REQUEST_METHOD': method},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request(path, method)
         if issubclass(req_klass, S3AclRequest):
             s3_req = req_klass(req.environ, MagicMock())
         else:
             s3_req = req_klass(req.environ)
-        with nested(patch('oioswift.common.middleware.s3api.'
-                          'request.Request._get_response'),
-                    patch('oioswift.common.middleware.s3api.'
-                          'subresource.ACL.check_permission')) \
-                as (mock_get_resp, m_check_permission):
+        with patch(
+                'oioswift.common.middleware.s3api.'
+                'request.Request._get_response') as mock_get_resp, \
+                patch(
+                    'oioswift.common.middleware.s3api.'
+                    'subresource.ACL.check_permission') as m_check_permission:
             mock_get_resp.return_value = fake_swift_resp \
-                or FakeResponse(CONF.s3_acl)
-            return mock_get_resp, m_check_permission,\
+                                         or FakeResponse(CONF.s3_acl)
+            return mock_get_resp, m_check_permission, \
                 s3_req.get_response(self.s3api)
 
     def test_get_response_without_s3_acl(self):
@@ -186,11 +190,8 @@ class TestRequest(S3TestCase):
 
     def test_get_validate_param(self):
         def create_s3request_with_param(param, value):
-            req = Request.blank(
-                '/bucket?%s=%s' % (param, value),
-                environ={'REQUEST_METHOD': 'GET'},
-                headers={'Authorization': 'AWS test:tester:hmac',
-                         'Date': self.get_date_header()})
+            path = '/bucket?%s=%s' % (param, value)
+            req = self.get_request(path, 'GET')
             return S3_Request(req.environ, True)
 
         s3req = create_s3request_with_param('max-keys', '1')
@@ -230,14 +231,9 @@ class TestRequest(S3TestCase):
             result.exception.headers['content-type'], 'application/xml')
 
     def test_authenticate_delete_Authorization_from_s3req(self):
-        req = Request.blank('/bucket/obj',
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
-        with nested(patch.object(Request, 'get_response'),
-                    patch.object(Request, 'remote_user', 'authorized')) \
-                as (m_swift_resp, m_remote_user):
-
+        req = self.get_request('/bucket/obj', 'GET')
+        with patch.object(Request, 'get_response') as m_swift_resp, \
+                patch.object(Request, 'remote_user', 'authorized'):
             m_swift_resp.return_value = FakeSwiftResponse()
             s3_req = S3AclRequest(req.environ, MagicMock())
             self.assertNotIn('swift3.auth_details', s3_req.environ)
@@ -249,20 +245,14 @@ class TestRequest(S3TestCase):
         container = 'bucket'
         obj = 'obj'
         method = 'GET'
-        req = Request.blank('/%s/%s' % (container, obj),
-                            environ={'REQUEST_METHOD': method},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
-        with nested(patch.object(Request, 'get_response'),
-                    patch.object(Request, 'remote_user', 'authorized')) \
-                as (m_swift_resp, m_remote_user):
+        req = self.get_request('/%s/%s' % (container, obj), method)
 
+        with patch.object(Request, 'get_response') as m_swift_resp, \
+                patch.object(Request, 'remote_user', 'authorized'):
             m_swift_resp.return_value = FakeSwiftResponse()
             s3_req = S3AclRequest(req.environ, MagicMock())
             sw_req = s3_req.to_swift_req(method, container, obj)
             self.assertNotIn('swift3.auth_details', sw_req.environ)
-            self.assertNotIn('HTTP_AUTHORIZATION', sw_req.environ)
-            self.assertNotIn('Authorization', sw_req.headers)
             self.assertEqual(sw_req.headers['X-Auth-Token'], 'token')
 
     def test_to_swift_req_subrequest_proxy_access_log(self):
@@ -271,46 +261,37 @@ class TestRequest(S3TestCase):
         method = 'GET'
 
         # force_swift_request_proxy_log is True
-        req = Request.blank('/%s/%s' % (container, obj),
-                            environ={'REQUEST_METHOD': method,
-                                     'swift.proxy_access_log_made': True},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
-        with nested(patch.object(Request, 'get_response'),
-                    patch.object(Request, 'remote_user', 'authorized'),
-                    patch('oioswift.common.middleware.s3api.'
-                          'cfg.CONF.force_swift_request_proxy_log',
-                    True)) \
-                as (m_swift_resp, m_remote_user, m_cfg):
-
+        req = self.get_request('/%s/%s' % (container, obj), method)
+        req.environ['swift.proxy_access_log_made'] = True
+        with patch.object(Request, 'get_response') as m_swift_resp, \
+                patch.object(Request, 'remote_user', 'authorized'), \
+                patch('oioswift.common.middleware.s3api.'
+                      'cfg.CONF.force_swift_request_proxy_log', True):
             m_swift_resp.return_value = FakeSwiftResponse()
             s3_req = S3AclRequest(req.environ, MagicMock())
             sw_req = s3_req.to_swift_req(method, container, obj)
             self.assertFalse(sw_req.environ['swift.proxy_access_log_made'])
 
         # force_swift_request_proxy_log is False
-        req = Request.blank('/%s/%s' % (container, obj),
-                            environ={'REQUEST_METHOD': method,
-                                     'swift.proxy_access_log_made': True},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
-        with nested(patch.object(Request, 'get_response'),
-                    patch.object(Request, 'remote_user', 'authorized')) \
-                as (m_swift_resp, m_remote_user):
-
+        req = self.get_request('/%s/%s' % (container, obj), method)
+        req.environ['swift.proxy_access_log_made'] = True
+        with patch.object(Request, 'get_response') as m_swift_resp, \
+                patch.object(Request, 'remote_user', 'authorized'):
             m_swift_resp.return_value = FakeSwiftResponse()
             s3_req = S3AclRequest(req.environ, MagicMock())
             sw_req = s3_req.to_swift_req(method, container, obj)
             self.assertTrue(sw_req.environ['swift.proxy_access_log_made'])
 
     def test_get_container_info(self):
+        s3api_acl = '{"Owner":"owner", "Grant":'\
+            '["Grantee":"owner","Permission":"FULL_CONTROL"]}'
         self.swift.register('HEAD', '/v1/AUTH_test/bucket', HTTPNoContent,
                             {'x-container-read': 'foo',
                              'X-container-object-count': 5,
+                             'x-container-sysmeta-swift3-acl': s3api_acl,
                              'X-container-meta-foo': 'bar'}, None)
-        req = Request.blank('/bucket', environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+
+        req = self.get_request('/bucket', 'GET')
         s3_req = S3_Request(req.environ, True)
         # first, call get_response('HEAD')
         info = s3_req.get_container_info(self.app)
@@ -319,6 +300,7 @@ class TestRequest(S3TestCase):
         self.assertEqual('foo', info['read_acl'])  # sanity
         self.assertEqual('5', info['object_count'])  # sanity
         self.assertEqual({'foo': 'bar'}, info['meta'])  # sanity
+        self.assertEqual(s3api_acl, info['sysmeta']['swift3-acl'])
         with patch('oioswift.common.middleware.s3api.'
                    'request.get_container_info',
                    return_value={'status': 204}) as mock_info:
@@ -340,48 +322,36 @@ class TestRequest(S3TestCase):
     def test_date_header_missing(self):
         self.swift.register('HEAD', '/v1/AUTH_test/nojunk', swob.HTTPNotFound,
                             {}, None)
-        req = Request.blank('/nojunk',
-                            environ={'REQUEST_METHOD': 'HEAD'},
-                            headers={'Authorization': 'AWS test:tester:hmac'})
+        req = self.get_request('/nojunk', 'HEAD')
+        req.headers.pop('Date')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '403')
-        self.assertEqual(body, '')
+        self.assertEqual(body, b'')
 
     def test_date_header_expired(self):
         self.swift.register('HEAD', '/v1/AUTH_test/nojunk', swob.HTTPNotFound,
                             {}, None)
-        req = Request.blank('/nojunk',
-                            environ={'REQUEST_METHOD': 'HEAD'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': 'Fri, 01 Apr 2014 12:00:00 GMT'})
-
+        req = self.get_request('/nojunk', 'HEAD')
+        req.headers['Date'] = 'Fri, 01 Apr 2014 12:00:00 GMT'
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '403')
-        self.assertEqual(body, '')
+        self.assertEqual(body, b'')
 
     def test_date_header_with_x_amz_date_valid(self):
         self.swift.register('HEAD', '/v1/AUTH_test/nojunk', swob.HTTPNotFound,
                             {}, None)
-        req = Request.blank('/nojunk',
-                            environ={'REQUEST_METHOD': 'HEAD'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': 'Fri, 01 Apr 2014 12:00:00 GMT',
-                                     'x-amz-date': self.get_date_header()})
-
+        req = self.get_request('/nojunk', 'HEAD')
+        req.headers['Date'] = 'Fri, 01 Apr 2014 12:00:00 GMT'
+        req.headers['x-amz-date'] = self.get_date_header()
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '404')
-        self.assertEqual(body, '')
+        self.assertEqual(body, b'')
 
     def test_date_header_with_x_amz_date_expired(self):
         self.swift.register('HEAD', '/v1/AUTH_test/nojunk', swob.HTTPNotFound,
                             {}, None)
-        req = Request.blank('/nojunk',
-                            environ={'REQUEST_METHOD': 'HEAD'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'x-amz-date':
-                                     'Fri, 01 Apr 2014 12:00:00 GMT'})
-
+        req = self.get_request('/nojunk', 'HEAD')
+        req.headers['x-amz-date'] = 'Fri, 01 Apr 2014 12:00:00 GMT'
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '403')
         self.assertEqual(body, '')

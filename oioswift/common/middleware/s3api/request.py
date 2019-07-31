@@ -30,7 +30,7 @@ from swift.common.http import HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED, \
     HTTP_PARTIAL_CONTENT, HTTP_NOT_MODIFIED, HTTP_PRECONDITION_FAILED, \
     HTTP_REQUESTED_RANGE_NOT_SATISFIABLE, HTTP_LENGTH_REQUIRED, \
     HTTP_BAD_REQUEST, HTTP_REQUEST_TIMEOUT, HTTP_SERVICE_UNAVAILABLE, \
-    HTTP_CLIENT_CLOSED_REQUEST, HTTP_METHOD_NOT_ALLOWED, is_success
+    HTTP_CLIENT_CLOSED_REQUEST, is_success
 
 from swift.common.constraints import check_utf8, valid_api_version
 from swift.proxy.controllers.base import get_container_info, \
@@ -50,7 +50,7 @@ from oioswift.common.middleware.s3api.response import AccessDenied, \
     InvalidStorageClass, S3NotImplemented, InvalidURI, MalformedXML, \
     InvalidRequest, RequestTimeout, InvalidBucketName, BadDigest, \
     AuthorizationHeaderMalformed, AuthorizationQueryParametersError, \
-    ServiceUnavailable, BadRequest, MethodNotAllowed, BucketAlreadyOwnedByYou
+    ServiceUnavailable, BadRequest, BucketAlreadyOwnedByYou
 from oioswift.common.middleware.s3api.exception import NotS3Request
 from oioswift.common.middleware.s3api.utils import utf8encode, LOGGER, \
     check_path_header, S3Timestamp, mktime, MULTIUPLOAD_SUFFIX, \
@@ -1110,6 +1110,7 @@ class Request(swob.Request):
                 ],
                 'PUT': [
                     HTTP_CREATED,
+                    HTTP_ACCEPTED,
                 ],
                 'POST': [
                     HTTP_ACCEPTED,
@@ -1205,9 +1206,7 @@ class Request(swob.Request):
                     HTTP_PRECONDITION_FAILED: PreconditionFailed,
                 },
                 'DELETE': {
-                    HTTP_NOT_FOUND: (NoSuchBucket, container),
-                    HTTP_METHOD_NOT_ALLOWED: (MethodNotAllowed,
-                                              method, 'object'),
+                    HTTP_NOT_FOUND: (NoSuchKey, obj),
                 },
             }
 
@@ -1404,10 +1403,7 @@ class Request(swob.Request):
         if not CONF.allow_multipart_uploads:
             return None
         query = {'multipart-manifest': 'delete'}
-        try:
-            resp = self.get_versioned_response(app, 'HEAD')
-        except NoSuchKey:
-            return None
+        resp = self.get_versioned_response(app, 'HEAD')
         return query if resp.is_slo else None
 
 
