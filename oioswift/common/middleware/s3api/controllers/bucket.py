@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
 from base64 import standard_b64encode as b64encode
 from base64 import standard_b64decode as b64decode
+from six.moves.urllib.parse import quote
 
 from swift.common.http import HTTP_OK
 from swift.common.middleware.versioned_writes import DELETE_MARKER_CONTENT_TYPE
@@ -222,11 +222,13 @@ class BucketController(Controller):
                 SubElement(elem, 'Marker').text = req.params.get('marker')
             if is_truncated and 'delimiter' in req.params:
                 if 'name' in objects[-1]:
-                    SubElement(elem, 'NextMarker').text = \
-                        objects[-1]['name']
-                if 'subdir' in objects[-1]:
-                    SubElement(elem, 'NextMarker').text = \
-                        objects[-1]['subdir']
+                    name = objects[-1]['name']
+                else:
+                    name = objects[-1]['subdir']
+                if encoding_type == 'url':
+                    name = quote(name.encode('utf-8'))
+
+                SubElement(elem, 'NextMarker').text = name
         else:
             if is_truncated:
                 if 'name' in objects[-1]:
@@ -256,6 +258,10 @@ class BucketController(Controller):
 
         for o in objects:
             if 'subdir' not in o:
+                name = o['name']
+                if encoding_type == 'url':
+                    name = quote(name.encode('utf-8'))
+
                 if 'versions' in req.params:
                     version_id = o.get('version_id',
                                        o.get('sysmeta_version_id', 'null'))
@@ -264,15 +270,13 @@ class BucketController(Controller):
                         contents = SubElement(elem, 'DeleteMarker')
                     else:
                         contents = SubElement(elem, 'Version')
-                    SubElement(contents, 'Key').text = \
-                        o['name'].encode('utf-8')
+                    SubElement(contents, 'Key').text = name
                     SubElement(contents, 'VersionId').text = version_id
                     SubElement(contents, 'IsLatest').text = str(
                         'version_id' not in o).lower()
                 else:
                     contents = SubElement(elem, 'Contents')
-                    SubElement(contents, 'Key').text = \
-                        o['name'].encode('utf-8')
+                    SubElement(contents, 'Key').text = name
                 SubElement(contents, 'LastModified').text = \
                     o['last_modified'][:-3] + 'Z'
                 if 's3_etag' in o.get('content_type', ''):
@@ -290,10 +294,12 @@ class BucketController(Controller):
         for o in objects:
             if 'subdir' in o:
                 common_prefixes = SubElement(elem, 'CommonPrefixes')
-                SubElement(common_prefixes, 'Prefix').text = \
-                    o['subdir'].encode('utf-8')
+                name = o['subdir']
+                if encoding_type == 'url':
+                    name = quote(name.encode('utf-8'))
+                SubElement(common_prefixes, 'Prefix').text = name
 
-        body = tostring(elem, encoding_type=encoding_type)
+        body = tostring(elem)
 
         resp = HTTPOk(body=body, content_type='application/xml')
 
@@ -319,9 +325,8 @@ class BucketController(Controller):
             except (XMLSyntaxError, DocumentInvalid):
                 raise MalformedXML()
             except Exception as e:
-                exc_type, exc_value, exc_traceback = sys.exc_info()
                 LOGGER.error(e)
-                raise exc_type, exc_value, exc_traceback
+                raise
 
             if location != CONF.location:
                 # s3api cannot support multiple regions currently.

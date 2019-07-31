@@ -88,36 +88,34 @@ class TestS3Bucket(S3TestCase):
         super(TestS3Bucket, self).setUp()
         self.setup_objects()
 
+    def get_request(self, path, method):
+        return Request.blank(
+            path,
+            environ={'REQUEST_METHOD': method},
+            headers={'Authorization': 'AWS test:tester:hmac',
+                     'Date': self.get_date_header()})
+
+    def get_put_bucket_request(self):
+        return self.get_request('/bucket', 'PUT')
+
     def test_bucket_HEAD(self):
-        req = Request.blank('/junk',
-                            environ={'REQUEST_METHOD': 'HEAD'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/junk', 'HEAD')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
 
     def test_bucket_HEAD_error(self):
-        req = Request.blank('/nojunk',
-                            environ={'REQUEST_METHOD': 'HEAD'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/nojunk', 'HEAD')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '404')
         self.assertEqual(body, '')  # sanity
 
     def test_bucket_HEAD_slash(self):
-        req = Request.blank('/junk/',
-                            environ={'REQUEST_METHOD': 'HEAD'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/junk/', 'HEAD')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
 
     def test_bucket_HEAD_slash_error(self):
-        req = Request.blank('/nojunk/',
-                            environ={'REQUEST_METHOD': 'HEAD'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/nojunk/', 'HEAD')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '404')
 
@@ -134,10 +132,7 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET(self):
         bucket_name = 'junk'
-        req = Request.blank('/%s' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
 
@@ -158,10 +153,7 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_subdir(self):
         bucket_name = 'junk-subdir'
-        req = Request.blank('/%s' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
         elem = fromstring(body, 'ListBucketResult')
@@ -176,29 +168,21 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_is_truncated(self):
         bucket_name = 'junk'
-
-        req = Request.blank('/%s?max-keys=%d' %
-                            (bucket_name, len(self.objects)),
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?max-keys=%d' %
+                               (bucket_name, len(self.objects)),
+                               'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./IsTruncated').text, 'false')
 
-        req = Request.blank('/%s?max-keys=%d' %
-                            (bucket_name, len(self.objects) - 1),
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?max-keys=%d' %
+                               (bucket_name, len(self.objects) - 1),
+                               'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./IsTruncated').text, 'true')
 
-        req = Request.blank('/subdirs?delimiter=/&max-keys=2',
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/subdirs?delimiter=/&max-keys=2', 'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./IsTruncated').text, 'true')
@@ -207,22 +191,15 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_v2_is_truncated(self):
         bucket_name = 'junk'
-
-        req = Request.blank('/%s?list-type=2&max-keys=%d' %
-                            (bucket_name, len(self.objects)),
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?list-type=2&max-keys=%d' %
+                               (bucket_name, len(self.objects)), 'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./KeyCount').text, str(len(self.objects)))
         self.assertEqual(elem.find('./IsTruncated').text, 'false')
 
-        req = Request.blank('/%s?list-type=2&max-keys=%d' %
-                            (bucket_name, len(self.objects) - 1),
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?list-type=2&max-keys=%d' %
+                               (bucket_name, len(self.objects) - 1), 'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertIsNotNone(elem.find('./NextContinuationToken').text)
@@ -230,10 +207,8 @@ class TestS3Bucket(S3TestCase):
                          str(len(self.objects) - 1))
         self.assertEqual(elem.find('./IsTruncated').text, 'true')
 
-        req = Request.blank('/subdirs?list-type=2&delimiter=/&max-keys=2',
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/subdirs?list-type=2&delimiter=/&max-keys=2',
+                               'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertIsNotNone(elem.find('./NextContinuationToken').text)
@@ -242,11 +217,7 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_max_keys(self):
         bucket_name = 'junk'
-
-        req = Request.blank('/%s?max-keys=5' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?max-keys=5' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./MaxKeys').text, '5')
@@ -255,10 +226,7 @@ class TestS3Bucket(S3TestCase):
         args = dict(cgi.parse_qsl(query_string))
         self.assertEqual(args['limit'], '6')
 
-        req = Request.blank('/%s?max-keys=5000' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?max-keys=5000' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./MaxKeys').text, '5000')
@@ -269,41 +237,27 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_str_max_keys(self):
         bucket_name = 'junk'
-
-        req = Request.blank('/%s?max-keys=invalid' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?max-keys=invalid' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(self._get_error_code(body), 'InvalidArgument')
 
     def test_bucket_GET_negative_max_keys(self):
         bucket_name = 'junk'
-
-        req = Request.blank('/%s?max-keys=-1' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?max-keys=-1' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(self._get_error_code(body), 'InvalidArgument')
 
     def test_bucket_GET_over_32bit_int_max_keys(self):
         bucket_name = 'junk'
-
-        req = Request.blank('/%s?max-keys=%s' %
-                            (bucket_name, MAX_32BIT_INT + 1),
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?max-keys=%s' %
+                               (bucket_name, MAX_32BIT_INT + 1), 'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(self._get_error_code(body), 'InvalidArgument')
 
     def test_bucket_GET_passthroughs(self):
         bucket_name = 'junk'
-        req = Request.blank('/%s?delimiter=a&marker=b&prefix=c' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?delimiter=a&marker=b&prefix=c' %
+                               bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./Prefix').text, 'c')
@@ -318,11 +272,9 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_v2_passthroughs(self):
         bucket_name = 'junk'
-        req = Request.blank(
+        req = self.get_request(
             '/%s?list-type=2&delimiter=a&start-after=b&prefix=c' % bucket_name,
-            environ={'REQUEST_METHOD': 'GET'},
-            headers={'Authorization': 'AWS test:tester:hmac',
-                     'Date': self.get_date_header()})
+            'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./Prefix').text, 'c')
@@ -338,12 +290,9 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_with_nonascii_queries(self):
         bucket_name = 'junk'
-        req = Request.blank(
+        req = self.get_request(
             '/%s?delimiter=\xef\xbc\xa1&marker=\xef\xbc\xa2&'
-            'prefix=\xef\xbc\xa3' % bucket_name,
-            environ={'REQUEST_METHOD': 'GET'},
-            headers={'Authorization': 'AWS test:tester:hmac',
-                     'Date': self.get_date_header()})
+            'prefix=\xef\xbc\xa3' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./Prefix').text, '\xef\xbc\xa3')
@@ -358,12 +307,9 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_v2_with_nonascii_queries(self):
         bucket_name = 'junk'
-        req = Request.blank(
+        req = self.get_request(
             '/%s?list-type=2&delimiter=\xef\xbc\xa1&start-after=\xef\xbc\xa2&'
-            'prefix=\xef\xbc\xa3' % bucket_name,
-            environ={'REQUEST_METHOD': 'GET'},
-            headers={'Authorization': 'AWS test:tester:hmac',
-                     'Date': self.get_date_header()})
+            'prefix=\xef\xbc\xa3' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListBucketResult')
         self.assertEqual(elem.find('./Prefix').text, '\xef\xbc\xa3')
@@ -378,10 +324,8 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_with_delimiter_max_keys(self):
         bucket_name = 'junk'
-        req = Request.blank('/%s?delimiter=a&max-keys=2' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?delimiter=a&max-keys=2' % bucket_name,
+                               'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
         elem = fromstring(body, 'ListBucketResult')
@@ -391,11 +335,8 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_v2_with_delimiter_max_keys(self):
         bucket_name = 'junk'
-        req = Request.blank(
-            '/%s?list-type=2&delimiter=a&max-keys=2' % bucket_name,
-            environ={'REQUEST_METHOD': 'GET'},
-            headers={'Authorization': 'AWS test:tester:hmac',
-                     'Date': self.get_date_header()})
+        req = self.get_request(
+            '/%s?list-type=2&delimiter=a&max-keys=2' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
         elem = fromstring(body, 'ListBucketResult')
@@ -404,12 +345,9 @@ class TestS3Bucket(S3TestCase):
         self.assertEqual(elem.find('./MaxKeys').text, '2')
         self.assertEqual(elem.find('./IsTruncated').text, 'true')
 
-        req = Request.blank(
+        req = self.get_request(
             '/%s?list-type=2&delimiter=a&max-keys=2&continuation-token=%s' %
-            (bucket_name, next_token.text),
-            environ={'REQUEST_METHOD': 'GET'},
-            headers={'Authorization': 'AWS test:tester:hmac',
-                     'Date': self.get_date_header()})
+            (bucket_name, next_token.text), 'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
         elem = fromstring(body, 'ListBucketResult')
@@ -419,10 +357,8 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_subdir_with_delimiter_max_keys(self):
         bucket_name = 'junk-subdir'
-        req = Request.blank('/%s?delimiter=a&max-keys=1' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?delimiter=a&max-keys=1' % bucket_name,
+                               'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
         elem = fromstring(body, 'ListBucketResult')
@@ -432,10 +368,7 @@ class TestS3Bucket(S3TestCase):
 
     def test_bucket_GET_v2_fetch_owner(self):
         bucket_name = 'junk'
-        req = Request.blank('/%s?list-type=2' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?list-type=2' % bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
 
@@ -447,10 +380,8 @@ class TestS3Bucket(S3TestCase):
         for o in objects:
             self.assertIsNone(o.find('./Owner'))
 
-        req = Request.blank('/%s?list-type=2&fetch-owner=true' % bucket_name,
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/%s?list-type=2&fetch-owner=true' %
+                               bucket_name, 'GET')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
 
@@ -474,10 +405,7 @@ class TestS3Bucket(S3TestCase):
         self.swift.register('HEAD', '/v1/AUTH_test/junk/viola',
                             swob.HTTPOk, {}, None)
 
-        req = Request.blank('/junk?versions',
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/junk?versions', 'GET')
         status, headers, body = self.call_s3api(req)
 
         self.assertEqual(status.split()[0], '200')
@@ -535,10 +463,7 @@ class TestS3Bucket(S3TestCase):
                 '/v1/AUTH_test/junk/' + name.encode('utf-8'),
                 swob.HTTPOk, headers, None)
 
-        req = Request.blank('/junk?versions',
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/junk?versions', 'GET')
         status, headers, body = self.call_s3api(req)
 
         self.assertEqual(status.split()[0], '200')
@@ -558,10 +483,7 @@ class TestS3Bucket(S3TestCase):
         self.assertEqual(versions[2].find('./Key').text, 'rose')
 
         # with max keys
-        req = Request.blank('/junk?versions&max-keys=3',
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/junk?versions&max-keys=3', 'GET')
         status, headers, body = self.call_s3api(req)
 
         self.assertEqual(status.split()[0], '200')
@@ -580,10 +502,8 @@ class TestS3Bucket(S3TestCase):
                          ['true', 'true'])
 
         # with key-marker
-        req = Request.blank('/junk?versions&max-keys=2&key-marker=rose',
-                            environ={'REQUEST_METHOD': 'GET'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/junk?versions&max-keys=2&key-marker=rose',
+                               'GET')
         status, headers, body = self.call_s3api(req)
 
         self.assertEqual(status.split()[0], '200')
@@ -601,11 +521,8 @@ class TestS3Bucket(S3TestCase):
         self.assertEqual(versions[0].find('./IsLatest').text, 'true')
 
         # with key-marker and version-id-marker
-        req = Request.blank(
-            '/junk?versions&key-marker=rose&version-id-marker=2',
-            environ={'REQUEST_METHOD': 'GET'},
-            headers={'Authorization': 'AWS test:tester:hmac',
-                     'Date': self.get_date_header()})
+        req = self.get_request(
+            '/junk?versions&key-marker=rose&version-id-marker=2', 'GET')
         status, headers, body = self.call_s3api(req)
 
         self.assertEqual(status.split()[0], '200')
@@ -620,11 +537,8 @@ class TestS3Bucket(S3TestCase):
         self.assertEqual(versions[0].find('./IsLatest').text, 'false')
 
         # with key-marker and non-existent version-id-marker
-        req = Request.blank(
-            '/junk?versions&key-marker=rose&version-id-marker=x',
-            environ={'REQUEST_METHOD': 'GET'},
-            headers={'Authorization': 'AWS test:tester:hmac',
-                     'Date': self.get_date_header()})
+        req = self.get_request(
+            '/junk?versions&key-marker=rose&version-id-marker=x', 'GET')
         status, headers, body = self.call_s3api(req)
 
         self.assertEqual(status.split()[0], '200')
@@ -719,11 +633,8 @@ class TestS3Bucket(S3TestCase):
 
         # Apparently some clients will include a chunked transfer-encoding
         # even with no body
-        req = Request.blank('/bucket',
-                            environ={'REQUEST_METHOD': 'PUT'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'Transfer-Encoding': 'chunked'})
+        req = self.get_put_bucket_request()
+        req.headers['Transfer-Encoding'] = 'chunked'
         status, headers, body = self.call_s3api(req)
         if self.s3api.bucket_db:
             self.s3api.bucket_db.release('bucket')
@@ -733,12 +644,8 @@ class TestS3Bucket(S3TestCase):
         self.assertEqual(headers['Location'], '/bucket')
 
         with UnreadableInput(self) as fake_input:
-            req = Request.blank(
-                '/bucket',
-                environ={'REQUEST_METHOD': 'PUT',
-                         'wsgi.input': fake_input},
-                headers={'Authorization': 'AWS test:tester:hmac',
-                         'Date': self.get_date_header()})
+            req = self.get_put_bucket_request()
+            req.environ['wsgi.input'] = fake_input
             status, headers, body = self.call_s3api(req)
         self.assertEqual(body, '')
 
@@ -746,12 +653,8 @@ class TestS3Bucket(S3TestCase):
         elem = Element(root_element)
         SubElement(elem, 'LocationConstraint').text = 'US'
         xml = tostring(elem)
-
-        req = Request.blank('/bucket',
-                            environ={'REQUEST_METHOD': 'PUT'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()},
-                            body=xml)
+        req = self.get_put_bucket_request()
+        req.body = xml
         status, headers, body = self.call_s3api(req)
         if self.s3api.bucket_db:
             self.s3api.bucket_db.release('bucket')
@@ -772,11 +675,8 @@ class TestS3Bucket(S3TestCase):
         self._test_bucket_PUT_with_location('foo')
 
     def test_bucket_PUT_with_canned_acl(self):
-        req = Request.blank('/bucket',
-                            environ={'REQUEST_METHOD': 'PUT'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'X-Amz-Acl': 'public-read'})
+        req = self.get_put_bucket_request()
+        req.headers['X-Amz-Acl'] = 'public-read'
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
         _, _, headers = self.swift.calls_with_headers[-1]
@@ -789,11 +689,8 @@ class TestS3Bucket(S3TestCase):
         account = 'test:tester'
         acl = \
             encode_acl('container', ACLPublicRead(Owner(account, account)))
-        req = Request.blank('/bucket',
-                            environ={'REQUEST_METHOD': 'PUT'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header(),
-                                     'X-Amz-Acl': 'public-read'})
+        req = self.get_put_bucket_request()
+        req.headers['X-Amz-Acl'] = 'public-read'
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '200')
         _, _, headers = self.swift.calls_with_headers[-1]
@@ -807,23 +704,16 @@ class TestS3Bucket(S3TestCase):
         elem = Element('CreateBucketConfiguration')
         SubElement(elem, 'LocationConstraint').text = 'XXX'
         xml = tostring(elem)
-
-        req = Request.blank('/bucket',
-                            environ={'REQUEST_METHOD': 'PUT'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()},
-                            body=xml)
+        req = self.get_put_bucket_request()
+        req.body = xml
         status, headers, body = self.call_s3api(req)
         self.assertEqual(self._get_error_code(body),
                          'InvalidLocationConstraint')
 
     @s3acl
     def test_bucket_PUT_with_location_invalid_xml(self):
-        req = Request.blank('/bucket',
-                            environ={'REQUEST_METHOD': 'PUT'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()},
-                            body='invalid_xml')
+        req = self.get_put_bucket_request()
+        req.body = 'invalid_xml'
         status, headers, body = self.call_s3api(req)
         self.assertEqual(self._get_error_code(body), 'MalformedXML')
 
@@ -855,10 +745,7 @@ class TestS3Bucket(S3TestCase):
             'HEAD', '/v1/AUTH_test/bucket', swob.HTTPNoContent,
             {'X-Container-Object-Count': 0}, None)
 
-        req = Request.blank('/bucket',
-                            environ={'REQUEST_METHOD': 'DELETE'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/bucket', 'DELETE')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '204')
 
@@ -872,10 +759,7 @@ class TestS3Bucket(S3TestCase):
             'HEAD', '/v1/AUTH_test/bucket', swob.HTTPNoContent,
             {'X-Container-Object-Count': 0}, None)
 
-        req = Request.blank('/bucket',
-                            environ={'REQUEST_METHOD': 'DELETE'},
-                            headers={'Authorization': 'AWS test:tester:hmac',
-                                     'Date': self.get_date_header()})
+        req = self.get_request('/bucket', 'DELETE')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '503')
         called = [(method, path) for method, path, _ in
@@ -884,11 +768,8 @@ class TestS3Bucket(S3TestCase):
         self.assertNotIn(('DELETE', '/v1/AUTH_test/bucket'), called)
 
     def _test_bucket_for_s3acl(self, method, account):
-        req = Request.blank('/bucket',
-                            environ={'REQUEST_METHOD': method},
-                            headers={'Authorization': 'AWS %s:hmac' % account,
-                                     'Date': self.get_date_header()})
-
+        req = self.get_request('/bucket', method)
+        req.headers['Authorization'] = 'AWS %s:hmac' % account
         return self.call_s3api(req)
 
     @s3acl(s3acl_only=True)
