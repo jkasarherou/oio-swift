@@ -13,9 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
+import copy
+import json
 
-from swift.common.utils import public
+from swift.common.utils import public, StreamingPile
+from swift.common.constraints import MAX_OBJECT_NAME_LENGTH
 
 from oioswift.common.middleware.s3api.controllers.base import Controller, \
     bucket_operation
@@ -23,12 +25,9 @@ from oioswift.common.middleware.s3api.etree import Element, SubElement, \
     fromstring, tostring, XMLSyntaxError, DocumentInvalid
 from oioswift.common.middleware.s3api.response import HTTPOk, \
     S3NotImplemented, ErrorResponse, MalformedXML, UserKeyMustBeSpecified, \
-    AccessDenied, MissingRequestBodyError
+    AccessDenied, MissingRequestBodyError, NoSuchKey
 from oioswift.common.middleware.s3api.cfg import CONF
 from oioswift.common.middleware.s3api.utils import LOGGER
-
-# 1000 keys with len 1024 and XML overhead
-MAX_MULTI_DELETE_BODY_SIZE = 1536000
 
 
 class MultiObjectDeleteController(Controller):
@@ -66,8 +65,12 @@ class MultiObjectDeleteController(Controller):
 
                 yield key, version
 
+        max_body_size = min(
+            2 * CONF.max_multi_delete_objects * MAX_OBJECT_NAME_LENGTH,
+            10 * 1024 * 1024)
+
         try:
-            xml = req.xml(MAX_MULTI_DELETE_BODY_SIZE)
+            xml = req.xml(max_body_size)
             if not xml:
                 raise MissingRequestBodyError()
 
@@ -88,9 +91,8 @@ class MultiObjectDeleteController(Controller):
         except ErrorResponse:
             raise
         except Exception as e:
-            exc_type, exc_value, exc_traceback = sys.exc_info()
             LOGGER.error(e)
-            raise exc_type, exc_value, exc_traceback
+            raise
 
         elem = Element('DeleteResult')
 
@@ -101,26 +103,51 @@ class MultiObjectDeleteController(Controller):
             body = self._gen_error_body(error, elem, delete_list)
             return HTTPOk(body=body)
 
-        for key, version in delete_list:
-            if version is not None:
-                # TODO: delete the specific version of the object
-                raise S3NotImplemented()
+        if any(version is not None for _key, version in delete_list):
+            raise S3NotImplemented()
 
+        def do_delete(base_req, key, version):
+            req = copy.copy(base_req)
+            req.environ = copy.copy(base_req.environ)
             req.object_name = key
 
             try:
                 query = req.gen_multipart_manifest_delete_query(self.app)
-                req.get_response(self.app, method='DELETE', query=query)
+                resp = req.get_response(self.app, method='DELETE', query=query,
+                                        headers={'Accept': 'application/json'})
+                if query:
+                    try:
+                        delete_result = json.loads(resp.body)
+                        if delete_result['Errors']:
+                            msg_parts = [delete_result['Response Status']]
+                            msg_parts.extend(
+                                '%s: %s' % (obj, status)
+                                for obj, status in delete_result['Errors'])
+                            return key, {'code': 'SLODeleteError',
+                                         'message': '\n'.join(msg_parts)}
+                    except (ValueError, TypeError, KeyError):
+                        LOGGER.exception((
+                            'Could not parse SLO delete response: %r',
+                            resp.body))
+                        return key, {'code': 'SLODeleteError',
+                                     'message': 'Unexpected swift response'}
+            except NoSuchKey:
+                pass
             except ErrorResponse as e:
-                error = SubElement(elem, 'Error')
-                SubElement(error, 'Key').text = key
-                SubElement(error, 'Code').text = e.__class__.__name__
-                SubElement(error, 'Message').text = e._msg
-                continue
+                return key, {'code': e.__class__.__name__, 'message': e._msg}
+            return key, None
 
-            if not self.quiet:
-                deleted = SubElement(elem, 'Deleted')
-                SubElement(deleted, 'Key').text = key
+        with StreamingPile(CONF.multi_delete_concurrency) as pile:
+            for key, err in pile.asyncstarmap(do_delete, (
+                    (req, key, version) for key, version in delete_list)):
+                if err:
+                    error = SubElement(elem, 'Error')
+                    SubElement(error, 'Key').text = key
+                    SubElement(error, 'Code').text = err['code']
+                    SubElement(error, 'Message').text = err['message']
+                elif not self.quiet:
+                    deleted = SubElement(elem, 'Deleted')
+                    SubElement(deleted, 'Key').text = key
 
         body = tostring(elem)
 

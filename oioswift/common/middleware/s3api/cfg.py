@@ -62,6 +62,7 @@ CONF = Config({
     'max_bucket_listing': 1000,
     'max_parts_listing': 1000,
     'max_multi_delete_objects': 1000,
+    'multi_delete_concurrency': 2,
     's3_acl': False,
     's3_acl_inherit': False,
     's3_acl_openbar': False,
