@@ -85,7 +85,7 @@ def fromstring(text, root_tag=None):
     return elem
 
 
-def tostring(tree, encoding_type=None, use_s3ns=True):
+def tostring(tree, use_s3ns=True, xml_declaration=True):
     if use_s3ns:
         nsmap = tree.nsmap.copy()
         nsmap[None] = XMLNS_S3
@@ -95,21 +95,8 @@ def tostring(tree, encoding_type=None, use_s3ns=True):
         root.extend(deepcopy(tree.getchildren()))
         tree = root
 
-    if encoding_type == 'url':
-        tree = deepcopy(tree)
-        for e in tree.iter():
-            # Some elements are not url-encoded even when we specify
-            # encoding_type=url.
-            if e.tag not in URLENCODE_BLACKLIST:
-                if isinstance(e.text, basestring):
-                    # If the value contains control chars,
-                    # it may be urlencoded already.
-                    if e.get('urlencoded', None) == 'True':
-                        e.attrib.pop('urlencoded')
-                    else:
-                        e.text = quote(e.text)
-
-    return lxml.etree.tostring(tree, xml_declaration=True, encoding='UTF-8')
+    return lxml.etree.tostring(tree, xml_declaration=xml_declaration,
+                               encoding='UTF-8')
 
 
 class _Element(lxml.etree.ElementBase):
