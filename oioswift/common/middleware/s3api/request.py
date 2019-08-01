@@ -50,8 +50,9 @@ from oioswift.common.middleware.s3api.response import AccessDenied, \
     InvalidStorageClass, S3NotImplemented, InvalidURI, MalformedXML, \
     InvalidRequest, RequestTimeout, InvalidBucketName, BadDigest, \
     AuthorizationHeaderMalformed, AuthorizationQueryParametersError, \
-    ServiceUnavailable, BadRequest, BucketAlreadyOwnedByYou
-from oioswift.common.middleware.s3api.exception import NotS3Request
+    ServiceUnavailable, BucketAlreadyOwnedByYou
+from oioswift.common.middleware.s3api.exception import NotS3Request, \
+    BadSwiftRequest
 from oioswift.common.middleware.s3api.utils import utf8encode, LOGGER, \
     check_path_header, S3Timestamp, mktime, MULTIUPLOAD_SUFFIX, \
     versioned_object_name, VERSIONING_SUFFIX
@@ -1234,12 +1235,15 @@ class Request(swob.Request):
                 # Allow anonymous HEAD requests to read object ACLs
                 sw_req.environ['swift.authorize_override'] = True
 
-        sw_resp = sw_req.get_response(app)
-
-        # reuse account and tokens
-        _, self.account, _ = split_path(sw_resp.environ['PATH_INFO'],
-                                        2, 3, True)
-        self.account = utf8encode(self.account)
+        try:
+            sw_resp = sw_req.get_response(app)
+        except swob.HTTPException as err:
+            sw_resp = err
+        else:
+            # reuse account and tokens
+            _, self.account, _ = split_path(sw_resp.environ['PATH_INFO'],
+                                            2, 3, True)
+            self.account = utf8encode(self.account)
 
         resp = Response.from_swift_resp(sw_resp)
         status = resp.status_int  # pylint: disable-msg=E1101
@@ -1273,7 +1277,7 @@ class Request(swob.Request):
                 raise err_resp()
 
         if status == HTTP_BAD_REQUEST:
-            raise BadRequest(err_msg)
+            raise BadSwiftRequest(err_msg.decode('utf-8'))
         if status == HTTP_UNAUTHORIZED:
             raise SignatureDoesNotMatch()
         if status == HTTP_FORBIDDEN:
