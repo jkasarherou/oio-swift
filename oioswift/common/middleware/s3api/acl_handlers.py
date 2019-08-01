@@ -128,6 +128,10 @@ class BaseAclHandler(object):
         resource = 'object' if obj else 'container'
         headers = self.headers if headers is None else headers
 
+        LOGGER.debug(
+            'checking permission: {} {} {} {}'.format(
+                container, obj, sw_method, dict(headers)))
+
         if not container:
             return
 
@@ -149,7 +153,13 @@ class BaseAclHandler(object):
                                              container, '')
             acl = resp.bucket_acl
 
-        acl.check_permission(self.user_id, permission)
+        try:
+            acl.check_permission(self.user_id, permission)
+        except Exception as e:
+            LOGGER.debug(acl)
+            LOGGER.debug('permission denied: {} {} {}'.format(
+                e, self.user_id, permission))
+            raise
 
         if sw_method == 'HEAD':
             return resp
@@ -324,14 +334,13 @@ class MultiUploadAclHandler(BaseAclHandler):
         super(MultiUploadAclHandler, self).__init__(req, container, obj,
                                                     headers)
         self.container = self.container[:-len(MULTIUPLOAD_SUFFIX)]
+        self.acl_checked = False
 
     def handle_acl(self, app, method):
         method = method or self.method
         # MultiUpload stuffs don't need acl check basically.
         if hasattr(self, method):
             return getattr(self, method)(app)
-        else:
-            pass
 
     def HEAD(self, app):
         # For _check_upload_info
@@ -370,17 +379,15 @@ class UploadsAclHandler(MultiUploadAclHandler):
         self._handle_acl(app, 'GET', self.container, '')
 
     def PUT(self, app):
-        if not self.obj:
-            # Initiate Multipart Uploads (put +segment container)
-            resp = self._handle_acl(app, 'HEAD')
+        if not self.acl_checked:
+            resp = self._handle_acl(app, 'HEAD', obj='')
             req_acl = ACL.from_headers(self.req.headers,
                                        resp.bucket_acl.owner,
                                        Owner(self.user_id, self.user_id))
             acl_headers = encode_acl('object', req_acl)
             self.req.headers[sysmeta_header('object', 'tmpacl')] = \
                 acl_headers[sysmeta_header('object', 'acl')]
-
-        # No check needed at Initiate Multipart Uploads (put upload id object)
+            self.acl_checked = True
 
 
 class UploadAclHandler(MultiUploadAclHandler):
