@@ -27,9 +27,9 @@ from oioswift.common.middleware.s3api.etree import tostring, Element, \
     SubElement
 from oioswift.common.middleware.s3api.subresource import ACL, ACLPrivate, \
     User, encode_acl, AuthenticatedUsers, AllUsers, Owner, Grant, PERMISSIONS
-from oioswift.common.middleware.s3api.cfg import CONF
 from tests.unit.common.middleware.s3api.exceptions import NotMethodException
 from tests.unit.common.middleware.s3api.test_s3api import S3TestCase
+from tests.unit.common.middleware.s3api import FakeSwift
 
 XMLNS_XSI = 'http://www.w3.org/2001/XMLSchema-instance'
 
@@ -79,11 +79,11 @@ def s3acl(func=None, s3acl_only=False):
             call_func()
             instance.swift._calls = []
 
-        with patch('oioswift.common.middleware.s3api.'
-                   'cfg.CONF.s3_acl', True):
-            owner = Owner('test:tester', 'test:tester')
-            generate_s3acl_environ('test', instance.swift, owner)
-            call_func(' (fail at s3_acl)')
+        instance.s3api.conf.s3_acl = True
+        instance.swift.s3_acl = True
+        owner = Owner('test:tester', 'test:tester')
+        generate_s3acl_environ('test', instance.swift, owner)
+        call_func(' (fail at s3_acl)')
 
     return s3acl_decorator
 
@@ -164,7 +164,8 @@ class TestS3Acl(S3TestCase):
     def setUp(self):
         super(TestS3Acl, self).setUp()
 
-        CONF.s3_acl = True
+        self.s3api.conf.s3_acl = True
+        self.swift.s3_acl = True
 
         account = 'test'
         owner_name = '%s:tester' % account
@@ -172,7 +173,7 @@ class TestS3Acl(S3TestCase):
         generate_s3acl_environ(account, self.swift, self.default_owner)
 
     def tearDown(self):
-        CONF.s3_acl = False
+        self.s3api.conf.s3_acl = False
 
     def test_bucket_acl_PUT_with_other_owner(self):
         req = Request.blank('/bucket?acl',
@@ -510,7 +511,8 @@ class TestS3Acl(S3TestCase):
 
         class FakeClass(object):
             def __init__(self):
-                self.swift = MagicMock()
+                self.s3api = MagicMock()
+                self.swift = FakeSwift()
 
             @s3acl
             def s3acl_error(self):
@@ -522,12 +524,12 @@ class TestS3Acl(S3TestCase):
 
             @s3acl(s3acl_only=True)
             def s3acl_s3only_error(self):
-                if CONF.s3_acl:
+                if self.s3api.conf.s3_acl:
                     raise TypeError()
 
             @s3acl(s3acl_only=True)
             def s3acl_s3only_no_error(self):
-                if not CONF.s3_acl:
+                if not self.s3api.conf.s3_acl:
                     raise TypeError()
 
         fake_class = FakeClass()

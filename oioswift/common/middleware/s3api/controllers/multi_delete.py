@@ -26,7 +26,6 @@ from oioswift.common.middleware.s3api.etree import Element, SubElement, \
 from oioswift.common.middleware.s3api.response import HTTPOk, \
     S3NotImplemented, ErrorResponse, MalformedXML, UserKeyMustBeSpecified, \
     AccessDenied, MissingRequestBodyError, NoSuchKey
-from oioswift.common.middleware.s3api.cfg import CONF
 from oioswift.common.middleware.s3api.utils import LOGGER
 
 
@@ -66,7 +65,7 @@ class MultiObjectDeleteController(Controller):
                 yield key, version
 
         max_body_size = min(
-            2 * CONF.max_multi_delete_objects * MAX_OBJECT_NAME_LENGTH,
+            2 * self.conf.max_multi_delete_objects * MAX_OBJECT_NAME_LENGTH,
             10 * 1024 * 1024)
 
         try:
@@ -84,7 +83,7 @@ class MultiObjectDeleteController(Controller):
                 self.quiet = False
 
             delete_list = list(object_key_iter(elem))
-            if len(delete_list) > CONF.max_multi_delete_objects:
+            if len(delete_list) > self.conf.max_multi_delete_objects:
                 raise MalformedXML()
         except (XMLSyntaxError, DocumentInvalid):
             raise MalformedXML()
@@ -137,7 +136,7 @@ class MultiObjectDeleteController(Controller):
                 return key, {'code': e.__class__.__name__, 'message': e._msg}
             return key, None
 
-        with StreamingPile(CONF.multi_delete_concurrency) as pile:
+        with StreamingPile(self.conf.multi_delete_concurrency) as pile:
             for key, err in pile.asyncstarmap(do_delete, (
                     (req, key, version) for key, version in delete_list)):
                 if err:

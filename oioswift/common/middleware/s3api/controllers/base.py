@@ -78,8 +78,9 @@ class Controller(object):
     """
     Base WSGI controller class for the middleware
     """
-    def __init__(self, app, **kwargs):
+    def __init__(self, app, conf, **kwargs):
         self.app = app
+        self.conf = conf
 
     @classmethod
     def resource_type(cls):
@@ -94,5 +95,5 @@ class UnsupportedController(Controller):
     """
     Handles unsupported requests.
     """
-    def __init__(self, app, **kwargs):
+    def __init__(self, app, conf, **kwargs):
         raise S3NotImplemented('The requested resource is not implemented')

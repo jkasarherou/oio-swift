@@ -847,9 +847,8 @@ class TestS3Obj(S3TestCase):
             self.assertEqual(code, 'NoSuchBucket')
 
     @s3acl
-    @patch('oioswift.common.middleware.s3api.'
-           'cfg.CONF.allow_multipart_uploads', False)
     def test_object_DELETE_no_multipart(self):
+        self.s3api.conf.allow_multipart_uploads = False
         req = self.get_request('/bucket/object', 'DELETE')
         status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '204')

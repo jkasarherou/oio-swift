@@ -15,7 +15,6 @@
 
 import unittest
 from mock import patch, MagicMock
-from contextlib import nested
 from datetime import datetime
 import hashlib
 import mock
@@ -41,7 +40,6 @@ from oioswift.common.middleware.s3api.request import SigV4Request, \
 from oioswift.common.middleware.s3api.etree import fromstring
 from oioswift.common.middleware.s3api.s3api import filter_factory, S3Middleware
 from oioswift.common.middleware.s3api.s3_token_middleware import S3Token
-from oioswift.common.middleware.s3api.cfg import CONF
 
 
 class TestS3Middleware(S3TestCase):
@@ -525,95 +523,87 @@ class TestS3Middleware(S3TestCase):
         self.assertEqual(elem.find('./ResourceType').text, 'ACL')
 
     def test_registered_defaults(self):
-        filter_factory(CONF)
+        filter_factory(self.conf)
         swift_info = utils.get_swift_info()
         self.assertTrue('s3api' in swift_info)
         self.assertEqual(swift_info['s3api'].get('max_bucket_listing'),
-                         CONF.max_bucket_listing)
+                         self.conf.max_bucket_listing)
         self.assertEqual(swift_info['s3api'].get('max_parts_listing'),
-                         CONF.max_parts_listing)
+                         self.conf.max_parts_listing)
         self.assertEqual(swift_info['s3api'].get('max_upload_part_num'),
-                         CONF.max_upload_part_num)
+                         self.conf.max_upload_part_num)
         self.assertEqual(swift_info['s3api'].get('max_multi_delete_objects'),
-                         CONF.max_multi_delete_objects)
+                         self.conf.max_multi_delete_objects)
 
     def test_check_pipeline(self):
-        with nested(
+        with patch("oioswift.common.middleware.s3api.s3api.loadcontext"), \
                 patch("oioswift.common.middleware.s3api."
-                      "s3api.CONF"),
-                patch("oioswift.common.middleware.s3api."
-                      "s3api.PipelineWrapper"),
-                patch("oioswift.common.middleware.s3api."
-                      "s3api.loadcontext")) as (conf, pipeline, _):
-            conf.auth_pipeline_check = True
-            conf.__file__ = ''
+                      "s3api.PipelineWrapper") as pipeline:
+            self.conf.auth_pipeline_check = True
+            self.conf.__file__ = ''
 
             pipeline.return_value = 's3api tempauth proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             # This *should* still work; authtoken will remove our auth details,
             # but the X-Auth-Token we drop in will remain
             # if we found one in the response
             pipeline.return_value = 's3api s3token authtoken keystoneauth ' \
                 'proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             # This should work now; no more doubled-up requests to keystone!
             pipeline.return_value = 's3api s3token keystoneauth proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             pipeline.return_value = 's3api swauth proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             # Note that authtoken would need to have delay_auth_decision=True
             pipeline.return_value = 's3api authtoken s3token keystoneauth ' \
                 'proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             pipeline.return_value = 's3api proxy-server'
             with self.assertRaises(ValueError) as cm:
-                self.s3api.check_pipeline(conf)
+                self.s3api.check_pipeline(self.conf)
             self.assertIn('expected auth between s3api and proxy-server',
                           cm.exception.message)
 
             pipeline.return_value = 'proxy-server'
             with self.assertRaises(ValueError) as cm:
-                self.s3api.check_pipeline(conf)
+                self.s3api.check_pipeline(self.conf)
             self.assertIn("missing filters ['s3api']",
                           cm.exception.message)
 
     def test_s3api_initialization_with_disabled_pipeline_check(self):
-        with nested(
-                patch("oioswift.common.middleware.s3api.s3api.CONF"),
-                patch("oioswift.common.middleware.s3api."
-                      "s3api.PipelineWrapper"),
-                patch("oioswift.common.middleware.s3api."
-                      "s3api.loadcontext")) as \
-                    (conf, pipeline, _):
+        with patch("oioswift.common.middleware.s3api.s3api.loadcontext"), \
+             patch("oioswift.common.middleware.s3api."
+                   "s3api.PipelineWrapper") as pipeline:
             # Disable pipeline check
-            conf.auth_pipeline_check = False
-            conf.__file__ = ''
+            self.conf.auth_pipeline_check = False
+            self.conf.__file__ = ''
 
             pipeline.return_value = 's3api tempauth proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             pipeline.return_value = 's3api s3token authtoken keystoneauth ' \
                 'proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             pipeline.return_value = 's3api swauth proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             pipeline.return_value = 's3api authtoken s3token keystoneauth ' \
                 'proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             pipeline.return_value = 's3api proxy-server'
-            self.s3api.check_pipeline(conf)
+            self.s3api.check_pipeline(self.conf)
 
             pipeline.return_value = 'proxy-server'
             with self.assertRaises(ValueError):
-                self.s3api.check_pipeline(conf)
+                self.s3api.check_pipeline(self.conf)
 
     def test_signature_v4(self):
         environ = {
@@ -726,7 +716,7 @@ class TestS3Middleware(S3TestCase):
             env.update(environ)
             with patch('oioswift.common.middleware.s3api.'
                        'request.Request._validate_headers'):
-                req = SigV4Request(env)
+                req = SigV4Request(env, location=self.conf.location)
             return req
 
         def canonical_string(path, environ):
@@ -736,7 +726,7 @@ class TestS3Middleware(S3TestCase):
             # See http://docs.aws.amazon.com/general/latest/gr
             # /signature-v4-test-suite.html for where location, service, and
             # signing key came from
-            with patch.object(CONF, 'location', 'us-east-1'), \
+            with patch.object(self.conf, 'location', 'us-east-1'), \
                     patch.object(oioswift.common.middleware.s3api.request,
                                  'SERVICE', 'host'):
                 req = _get_req(path, environ)
@@ -926,7 +916,7 @@ class TestS3Middleware(S3TestCase):
             self.swift, {'operator_roles': 'swift-user'})
         self.s3_token = S3Token(
             self.keystone_auth, {'auth_uri': 'https://fakehost/identity'})
-        self.s3api = S3Middleware(self.s3_token, CONF)
+        self.s3api = S3Middleware(self.s3_token, self.conf)
         req = Request.blank(
             '/bucket',
             environ={'REQUEST_METHOD': 'PUT'},
@@ -952,7 +942,7 @@ class TestS3Middleware(S3TestCase):
             self.swift, {'operator_roles': 'swift-user'})
         self.s3_token = S3Token(
             self.keystone_auth, {'auth_uri': 'https://fakehost/identity'})
-        self.s3api = S3Middleware(self.s3_token, CONF)
+        self.s3api = S3Middleware(self.s3_token, self.conf)
         req = Request.blank(
             '/bucket',
             environ={'REQUEST_METHOD': 'PUT'},
@@ -980,7 +970,7 @@ class TestS3Middleware(S3TestCase):
             self.keystone_auth, {'delay_auth_decision': 'True'})
         self.s3_token = S3Token(
             self.auth_token, {'auth_uri': 'https://fakehost/identity'})
-        self.s3api = S3Middleware(self.s3_token, CONF)
+        self.s3api = S3Middleware(self.s3_token, self.conf)
         req = Request.blank(
             '/bucket',
             environ={'REQUEST_METHOD': 'PUT'},
@@ -1018,7 +1008,7 @@ class TestS3Middleware(S3TestCase):
             self.keystone_auth, {'delay_auth_decision': 'True'})
         self.s3_token = S3Token(
             self.auth_token, {'auth_uri': 'https://fakehost/identity'})
-        self.s3api = S3Middleware(self.s3_token, CONF)
+        self.s3api = S3Middleware(self.s3_token, self.conf)
         req = Request.blank(
             '/bucket',
             environ={'REQUEST_METHOD': 'PUT'},

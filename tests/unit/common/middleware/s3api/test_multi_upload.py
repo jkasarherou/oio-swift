@@ -32,7 +32,6 @@ from oioswift.common.middleware.s3api.etree import fromstring, tostring
 from oioswift.common.middleware.s3api.subresource import Owner, Grant, User, \
     ACL, encode_acl, decode_acl, ACLPublicRead
 from tests.unit.common.middleware.s3api.test_s3_acl import s3acl
-from oioswift.common.middleware.s3api.cfg import CONF
 from oioswift.common.middleware.s3api.utils import sysmeta_header, mktime, \
     S3Timestamp
 from oioswift.common.middleware.s3api.request import MAX_32BIT_INT
@@ -97,7 +96,7 @@ class TestS3MultiUpload(S3TestCase):
         self.last_modified = 'Fri, 01 Apr 2014 12:00:00 GMT'
         put_headers = {'etag': self.etag, 'last-modified': self.last_modified}
 
-        CONF.min_segment_size = 1
+        self.conf.min_segment_size = 1
 
         objects = [{'name': item[0], 'last_modified': item[1],
                     'hash': item[2], 'bytes': item[3]}
@@ -806,9 +805,8 @@ class TestS3MultiUpload(S3TestCase):
                             swob.HTTPBadRequest, {}, msg)
         req = self.get_request('/bucket/object?uploadId=X', 'POST', XML)
 
-        with patch('oioswift.common.middleware.s3api.'
-                   'cfg.CONF.min_segment_size', min_segment_size):
-            status, headers, body = self.call_s3api(req)
+        self.s3api.conf.min_segment_size = min_segment_size
+        status, headers, body = self.call_s3api(req)
         self.assertEqual(status.split()[0], '400')
         self.assertEqual(self._get_error_code(body), 'EntityTooSmall')
         self.assertEqual(self._get_error_message(body), msg)
@@ -952,7 +950,7 @@ class TestS3MultiUpload(S3TestCase):
         self.assertEqual(
             tostring(ACLPublicRead(Owner('test:tester',
                                          'test:tester')).elem()),
-            tostring(decode_acl('object', headers).elem()))
+            tostring(decode_acl('object', headers, False).elem()))
 
     @s3acl
     def test_object_multipart_upload_abort_error(self):
@@ -1135,7 +1133,7 @@ class TestS3MultiUpload(S3TestCase):
     def test_object_list_parts_over_max_parts(self):
         req = self.get_request(
             '/bucket/object?uploadId=X&max-parts=%d' %
-            (CONF.max_parts_listing + 1),
+            (self.conf.max_parts_listing + 1),
             'GET')
         status, headers, body = self.call_s3api(req)
         elem = fromstring(body, 'ListPartsResult')
@@ -1190,7 +1188,7 @@ class TestS3MultiUpload(S3TestCase):
         self.assertEqual(self._get_error_code(body), 'InvalidArgument')
 
     def test_object_list_parts_over_part_number_marker(self):
-        part_number_marker = str(CONF.max_upload_part_num + 1)
+        part_number_marker = str(self.conf.max_upload_part_num + 1)
         req = self.get_request(
             '/bucket/object?uploadId=X&part-number-marker=%s' %
             part_number_marker,

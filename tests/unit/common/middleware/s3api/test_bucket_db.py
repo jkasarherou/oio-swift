@@ -16,8 +16,8 @@
 from swift.common import swob
 from swift.common.swob import Request
 from swift.common.utils import json
-from oioswift.common.middleware.s3api.cfg import CONF
 from oioswift.common.middleware.s3api.etree import fromstring
+from oioswift.common.middleware.s3api.bucket_db import get_bucket_db
 from tests.unit.common.middleware.s3api import S3TestCase
 
 
@@ -27,10 +27,10 @@ class TestS3BucketDb(S3TestCase):
         super(TestS3BucketDb, self).__init__(name)
 
     def setUp(self):
-        # Trick to load dummy bucket DB
-        CONF.bucket_db_enabled = True
-
         super(TestS3BucketDb, self).setUp()
+        self.conf.bucket_db_enabled = True
+        self.s3api.bucket_db = get_bucket_db(self.conf)
+
         self.swift.register('PUT', '/v1/AUTH_test2/bucket',
                             swob.HTTPCreated, {}, None)
         self.swift.register('PUT', '/v1/AUTH_test/bucket-server-error',

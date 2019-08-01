@@ -20,10 +20,10 @@ import time
 
 from swift.common import swob
 
-from oioswift.common.middleware.s3api.s3api import S3Middleware
+from oioswift.common.middleware.s3api.s3api import filter_factory
 from tests.unit.common.middleware.s3api.helpers import FakeSwift
 from oioswift.common.middleware.s3api.etree import fromstring
-from oioswift.common.middleware.s3api.cfg import CONF
+from oioswift.common.middleware.s3api.cfg import Config
 
 
 class FakeApp(object):
@@ -55,13 +55,32 @@ class S3TestCase(unittest.TestCase):
     def __init__(self, name):
         unittest.TestCase.__init__(self, name)
 
-        CONF.log_level = 'debug'
-        CONF.storage_domain = 'localhost'
-
     def setUp(self):
+        self.conf = Config({
+            'allow_no_owner': False,
+            'location': 'US',
+            'dns_compliant_bucket_names': True,
+            'max_bucket_listing': 1000,
+            'max_parts_listing': 1000,
+            'max_multi_delete_objects': 1000,
+            'multi_delete_concurrency': 2,
+            's3_acl': False,
+            's3_acl_inherit': False,
+            's3_acl_openbar': False,
+            'storage_domain': 'localhost',
+            'auth_pipeline_check': True,
+            'max_upload_part_num': 1000,
+            'check_bucket_owner': False,
+            'force_swift_request_proxy_log': False,
+            'allow_multipart_uploads': True,
+            'min_segment_size': 5242880,
+            'allow_anonymous_path_request': True
+        })
+        self.conf.log_level = 'debug'
+
         self.app = FakeApp()
         self.swift = self.app.swift
-        self.s3api = S3Middleware(self.app, CONF)
+        self.s3api = filter_factory({}, **self.conf)(self.app)
 
         self.swift.register('HEAD', '/v1/AUTH_test',
                             swob.HTTPOk, {}, None)

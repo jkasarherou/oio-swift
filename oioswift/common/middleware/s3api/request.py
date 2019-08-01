@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import base64
+from collections import OrderedDict
 from email.header import Header
 from hashlib import sha1, sha256, md5
 import hmac
@@ -56,12 +57,10 @@ from oioswift.common.middleware.s3api.exception import NotS3Request, \
 from oioswift.common.middleware.s3api.utils import utf8encode, LOGGER, \
     check_path_header, S3Timestamp, mktime, MULTIUPLOAD_SUFFIX, \
     versioned_object_name, VERSIONING_SUFFIX
-from oioswift.common.middleware.s3api.cfg import CONF
 from oioswift.common.middleware.s3api.subresource import decode_acl, encode_acl
 from oioswift.common.middleware.s3api.utils import sysmeta_header, \
     validate_bucket_name
 from oioswift.common.middleware.s3api.acl_utils import handle_acl_header
-from oioswift.common.middleware.s3api.acl_handlers import get_acl_handler
 
 
 # List of sub-resources that must be maintained as part of the HMAC
@@ -122,10 +121,10 @@ class SigV4Mixin(object):
 
     def check_signature(self, secret):
         user_signature = self.signature
-        derived_secret = 'AWS4' + secret
-        for scope_piece in self.scope:
+        derived_secret = b'AWS4' + secret
+        for scope_piece in self.scope.values():
             derived_secret = hmac.new(
-                derived_secret, scope_piece, sha256).digest()
+                derived_secret, scope_piece.encode('utf-8'), sha256).digest()
         valid_signature = hmac.new(
             derived_secret, self.string_to_sign, sha256).hexdigest()
         return user_signature == valid_signature
@@ -360,17 +359,22 @@ class SigV4Mixin(object):
 
     @property
     def scope(self):
-        return [self.timestamp.amz_date_format.split('T')[0],
-                CONF.location, SERVICE, 'aws4_request']
+        return OrderedDict([
+            ('date', self.timestamp.amz_date_format.split('T')[0]),
+            ('region', self.location),
+            ('service', SERVICE),
+            ('terminal', 'aws4_request'),
+        ])
 
     def _string_to_sign(self):
         """
         Create 'StringToSign' value in Amazon terminology for v4.
         """
-        return '\n'.join(['AWS4-HMAC-SHA256',
-                          self.timestamp.amz_date_format,
-                          '/'.join(self.scope),
-                          sha256(self._canonical_request()).hexdigest()])
+        return b'\n'.join([
+            b'AWS4-HMAC-SHA256',
+            self.timestamp.amz_date_format.encode('ascii'),
+            '/'.join(self.scope.values()).encode('utf-8'),
+            sha256(self._canonical_request()).hexdigest().encode('ascii')])
 
     def to_swift_req(self, method, container, obj, query=None,
                      body=None, headers=None):
@@ -391,11 +395,11 @@ class SigV4Mixin(object):
             method, container, obj, query=query, body=body, headers=headers)
 
 
-def get_request_class(env):
+def get_request_class(env, s3_acl):
     """
     Helper function to find a request class to use from Map
     """
-    if CONF.s3_acl:
+    if s3_acl:
         request_classes = (S3AclRequest, SigV4S3AclRequest)
     else:
         request_classes = (Request, SigV4Request)
@@ -419,9 +423,19 @@ class Request(swob.Request):
     bucket_acl = _header_acl_property('container')
     object_acl = _header_acl_property('object')
 
-    def __init__(self, env, app=None, slo_enabled=True):
+    def __init__(self, env, app=None, slo_enabled=True, storage_domain='',
+                 location='US', force_swift_request_proxy_log=False,
+                 dns_compliant_bucket_names=True,
+                 allow_multipart_uploads=True, allow_no_owner=False,
+                 allow_anonymous_path_request=True):
         # NOTE: app is not used by this class, need for compatibility of S3acl
         swob.Request.__init__(self, env)
+        self.storage_domain = storage_domain
+        self.location = location
+        self.force_swift_request_proxy_log = force_swift_request_proxy_log
+        self.dns_compliant_bucket_names = dns_compliant_bucket_names
+        self.allow_multipart_uploads = allow_multipart_uploads
+        self.allow_anonymous_path_request = allow_anonymous_path_request
         self._timestamp = None
         self.access_key, self.signature = self._parse_auth_info()
         self.bucket_in_host = self._parse_host()
@@ -458,6 +472,9 @@ class Request(swob.Request):
         # Avoids that swift.swob.Response replaces Location header value
         # by full URL when absolute path given. See swift.swob for more detail.
         self.environ['swift.leave_relative_location'] = True
+
+    def set_acl_handler(self, acl_handler):
+        pass
 
     def check_signature(self, secret):
         user_signature = self.signature
@@ -524,7 +541,7 @@ class Request(swob.Request):
                 del self.headers['Range']
 
     def _parse_host(self):
-        storage_domain = CONF.storage_domain
+        storage_domain = self.storage_domain
         if not storage_domain:
             return None
 
@@ -559,7 +576,8 @@ class Request(swob.Request):
         except ValueError:
             raise InvalidURI(self.path)
 
-        if bucket and not validate_bucket_name(bucket):
+        if bucket and not validate_bucket_name(
+                bucket, self.dns_compliant_bucket_names):
             # Ignore GET service case
             raise InvalidBucketName(bucket)
         return (bucket, obj)
@@ -612,7 +630,7 @@ class Request(swob.Request):
         elif self._is_header_auth:
             return self._parse_header_authentication()
         # TODO(mb): check src against auth_prefix's tempauth
-        elif self.bucket_db and CONF.allow_anymous_path_request and \
+        elif self.bucket_db and self.allow_anonymous_path_request and \
                 src and src != 'auth' and \
                 (self._parse_host() or (src and not valid_api_version(src))):
             # Anonymous request, we will have to resolve account name
@@ -1029,7 +1047,7 @@ class Request(swob.Request):
                     query = dict()
                 query['multipart-manifest'] = 'get'
 
-        if CONF.force_swift_request_proxy_log:
+        if self.force_swift_request_proxy_log:
             env['swift.proxy_access_log_made'] = False
         env['swift.source'] = 'S3'
         if method is not None:
@@ -1403,11 +1421,13 @@ class Request(swob.Request):
         sw_req = self.to_swift_req('HEAD', container_name, object_name)
         return get_object_info(sw_req.environ, app)
 
-    def gen_multipart_manifest_delete_query(self, app):
-        if not CONF.allow_multipart_uploads:
+    def gen_multipart_manifest_delete_query(self, app, obj=None):
+        if not self.allow_multipart_uploads:
             return None
+        if not obj:
+            obj = self.object_name
         query = {'multipart-manifest': 'delete'}
-        resp = self.get_versioned_response(app, 'HEAD')
+        resp = self.get_versioned_response(app, 'HEAD', obj=obj)
         return query if resp.is_slo else None
 
 
@@ -1415,10 +1435,20 @@ class S3AclRequest(Request):
     """
     S3Acl request object.
     """
-    def __init__(self, env, app, slo_enabled=True):
-        super(S3AclRequest, self).__init__(env, slo_enabled)
+    def __init__(self, env, app, slo_enabled=True, storage_domain='',
+                 location='US', force_swift_request_proxy_log=False,
+                 dns_compliant_bucket_names=True,
+                 allow_multipart_uploads=True, allow_no_owner=False,
+                 allow_anonymous_path_request=True):
+        super(S3AclRequest, self).__init__(
+            env, app, slo_enabled, storage_domain, location,
+            force_swift_request_proxy_log, dns_compliant_bucket_names,
+            allow_multipart_uploads, allow_no_owner,
+            allow_anonymous_path_request)
+        self.allow_no_owner = allow_no_owner
         if not self._is_anonymous:
             self.authenticate(app)
+        self.acl_handler = None
 
     @property
     def controller(self):
@@ -1484,8 +1514,11 @@ class S3AclRequest(Request):
         resp = self._get_response(
             app, method, container, obj, headers, body, query)
 
-        resp.bucket_acl = decode_acl('container', resp.sysmeta_headers)
-        resp.object_acl = decode_acl('object', resp.sysmeta_headers)
+        resp.bucket_acl = decode_acl(
+            'container', resp.sysmeta_headers, self.allow_no_owner)
+
+        resp.object_acl = decode_acl(
+            'object', resp.sysmeta_headers, self.allow_no_owner)
         return resp
 
     def get_response(self, app, method=None, container=None, obj=None,
@@ -1493,9 +1526,10 @@ class S3AclRequest(Request):
         """
         Wrap up get_response call to hook with acl handling method.
         """
-        acl_handler = get_acl_handler(self.controller_name)(
-            self, container, obj, headers)
-        resp = acl_handler.handle_acl(app, method)
+        if not self.acl_handler:
+            raise Exception('get_response called before set_acl_handler')
+        resp = self.acl_handler.handle_acl(
+            app, method, container, obj, headers)
 
         # possible to skip recalling get_response_acl if resp is not
         # None (e.g. HEAD)
@@ -1503,6 +1537,9 @@ class S3AclRequest(Request):
             return resp
         return self.get_acl_response(app, method, container, obj,
                                      headers, body, query)
+
+    def set_acl_handler(self, acl_handler):
+        self.acl_handler = acl_handler
 
 
 class SigV4Request(SigV4Mixin, Request):

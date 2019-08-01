@@ -27,7 +27,6 @@ from tests.unit.common.middleware.s3api import S3TestCase
 from tests.unit.common.middleware.s3api.helpers import UnreadableInput
 from oioswift.common.middleware.s3api.etree import fromstring, tostring, \
     Element, SubElement
-from oioswift.common.middleware.s3api.cfg import CONF
 from tests.unit.common.middleware.s3api.test_s3_acl import s3acl
 
 
@@ -194,7 +193,7 @@ class TestS3MultiDelete(S3TestCase):
     @s3acl
     def test_object_multi_DELETE_lots_of_keys(self):
         elem = Element('Delete')
-        for i in range(CONF.max_multi_delete_objects):
+        for i in range(self.conf.max_multi_delete_objects):
             name = 'x' * 1000 + str(i)
             self.swift.register('HEAD', '/v1/AUTH_test/bucket/' + name,
                                 swob.HTTPNotFound, {}, None)
@@ -206,12 +205,12 @@ class TestS3MultiDelete(S3TestCase):
         self.assertEqual(status.split()[0], '200')
         elem = fromstring(body)
         self.assertEqual(len(elem.findall('Deleted')),
-                         CONF.max_multi_delete_objects)
+                         self.conf.max_multi_delete_objects)
 
     @s3acl
     def test_object_multi_DELETE_too_many_keys(self):
         elem = Element('Delete')
-        for i in range(CONF.max_multi_delete_objects + 1):
+        for i in range(self.conf.max_multi_delete_objects + 1):
             obj = SubElement(elem, 'Object')
             SubElement(obj, 'Key').text = 'x' * 1000 + str(i)
         body = tostring(elem, use_s3ns=False)

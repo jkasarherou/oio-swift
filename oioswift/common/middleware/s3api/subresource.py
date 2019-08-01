@@ -22,7 +22,6 @@ from oioswift.common.middleware.s3api.response import InvalidArgument, \
 from oioswift.common.middleware.s3api.etree import Element, SubElement, \
     tostring
 from oioswift.common.middleware.s3api.utils import sysmeta_header
-from oioswift.common.middleware.s3api.cfg import CONF
 from oioswift.common.middleware.s3api.exception import InvalidSubresource
 
 XMLNS_XSI = 'http://www.w3.org/2001/XMLSchema-instance'
@@ -76,7 +75,7 @@ def encode_acl(resource, acl):
     return headers
 
 
-def decode_acl(resource, headers):
+def decode_acl(resource, headers, allow_no_owner):
     """
     Decode Swift metadata to an ACL instance.
 
@@ -94,12 +93,12 @@ def decode_acl(resource, headers):
         # I want an instance of Owner as None.
         # However, in the above process would occur error in reference
         # to an instance variable of Owner.
-        return ACL(Owner(None, None), [])
+        return ACL(Owner(None, None), [], True, allow_no_owner)
 
     try:
         encode_value = json.loads(value)
         if not isinstance(encode_value, dict):
-            return ACL(Owner(None, None), [])
+            return ACL(Owner(None, None), [], True, allow_no_owner)
 
         id = None
         name = None
@@ -118,7 +117,7 @@ def decode_acl(resource, headers):
                     grantee = User(grant['Grantee'])
                 permission = grant['Permission']
                 grants.append(Grant(grantee, permission))
-        return ACL(Owner(id, name), grants)
+        return ACL(Owner(id, name), grants, True, allow_no_owner)
     except Exception as e:
         raise InvalidSubresource((resource, 'acl', value), e)
 
@@ -398,12 +397,16 @@ class ACL(object):
     root_tag = 'AccessControlPolicy'
     max_xml_length = 200 * 1024
 
-    def __init__(self, owner, grants=[]):
+    def __init__(self, owner, grants=[], s3_acl=False, allow_no_owner=False,
+                 s3_acl_openbar=False):
         """
         :param owner: Owner Class for ACL instance
         """
         self.owner = owner
         self.grants = grants
+        self.s3_acl = s3_acl
+        self.allow_no_owner = allow_no_owner
+        self.s3_acl_openbar = s3_acl_openbar
 
     def __bytes__(self):
         return tostring(self.elem())
@@ -412,7 +415,8 @@ class ACL(object):
         return self.__bytes__()
 
     @classmethod
-    def from_elem(cls, elem):
+    def from_elem(cls, elem, s3_acl=False, allow_no_owner=False,
+                  s3_acl_openbar=False):
         """
         Convert an ElementTree to an ACL instance
         """
@@ -424,7 +428,8 @@ class ACL(object):
 
         grants = [Grant.from_elem(e)
                   for e in elem.findall('./AccessControlList/Grant')]
-        return cls(Owner(id, name), grants)
+        return cls(Owner(id, name), grants, s3_acl, allow_no_owner,
+                   s3_acl_openbar)
 
     def elem(self):
         """
@@ -446,12 +451,12 @@ class ACL(object):
         """
         Check that the user is an owner.
         """
-        if not CONF.s3_acl or CONF.s3_acl_openbar:
+        if not self.s3_acl or self.s3_acl_openbar:
             # Ignore s3api ACL.
             return
 
         if not self.owner.id:
-            if CONF.allow_no_owner:
+            if self.allow_no_owner:
                 # No owner means public.
                 return
             raise AccessDenied()
@@ -463,7 +468,7 @@ class ACL(object):
         """
         Check that the user has a permission.
         """
-        if not CONF.s3_acl or CONF.s3_acl_openbar:
+        if not self.s3_acl or self.s3_acl_openbar:
             # Ignore s3api ACL.
             return
 
@@ -535,12 +540,14 @@ class CannedACL(object):
     A dict-like object that returns canned ACL.
     """
     def __getitem__(self, key):
-        def acl(key, bucket_owner, object_owner=None):
+        def acl(key, bucket_owner, object_owner=None, s3_acl=False,
+                allow_no_owner=False, s3_acl_openbar=False):
             grants = []
             grantees = canned_acl_grantees(bucket_owner, object_owner)[key]
             for permission, grantee in grantees:
                 grants.append(Grant(grantee, permission))
-            return ACL(object_owner or bucket_owner, grants)
+            return ACL(object_owner or bucket_owner, grants, s3_acl,
+                       allow_no_owner, s3_acl_openbar)
 
         return partial(acl, key)
 

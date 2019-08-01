@@ -24,17 +24,15 @@ from oioswift.common.middleware.s3api.subresource import User, \
     ACLPublicReadWrite, ACLAuthenticatedRead, ACLBucketOwnerRead, \
     ACLBucketOwnerFullControl, Owner, ACL, encode_acl, decode_acl, \
     canned_acl_grantees, Grantee
-from oioswift.common.middleware.s3api.utils import CONF, sysmeta_header
+from oioswift.common.middleware.s3api.utils import sysmeta_header
 from oioswift.common.middleware.s3api.exception import InvalidSubresource
 
 
 class TestS3Subresource(unittest.TestCase):
 
     def setUp(self):
-        CONF.s3_acl = True
-
-    def tearDown(self):
-        CONF.s3_acl = False
+        self.s3_acl = True
+        self.allow_no_owner = False
 
     def test_acl_canonical_user(self):
         grantee = User('test:tester')
@@ -68,8 +66,10 @@ class TestS3Subresource(unittest.TestCase):
             return False
 
     def test_acl_private(self):
-        acl = ACLPrivate(Owner(id='test:tester',
-                               name='test:tester'))
+        acl = ACLPrivate(
+            Owner(id='test:tester', name='test:tester'),
+            s3_acl=self.s3_acl,
+            allow_no_owner=self.allow_no_owner)
 
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'WRITE'))
@@ -83,8 +83,10 @@ class TestS3Subresource(unittest.TestCase):
                                                'WRITE_ACP'))
 
     def test_acl_public_read(self):
-        acl = ACLPublicRead(Owner(id='test:tester',
-                                  name='test:tester'))
+        acl = ACLPublicRead(
+            Owner(id='test:tester', name='test:tester'),
+            s3_acl=self.s3_acl,
+            allow_no_owner=self.allow_no_owner)
 
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'WRITE'))
@@ -98,8 +100,10 @@ class TestS3Subresource(unittest.TestCase):
                                                'WRITE_ACP'))
 
     def test_acl_public_read_write(self):
-        acl = ACLPublicReadWrite(Owner(id='test:tester',
-                                       name='test:tester'))
+        acl = ACLPublicReadWrite(
+            Owner(id='test:tester', name='test:tester'),
+            s3_acl=self.s3_acl,
+            allow_no_owner=self.allow_no_owner)
 
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'WRITE'))
@@ -113,8 +117,10 @@ class TestS3Subresource(unittest.TestCase):
                                                'WRITE_ACP'))
 
     def test_acl_authenticated_read(self):
-        acl = ACLAuthenticatedRead(Owner(id='test:tester',
-                                         name='test:tester'))
+        acl = ACLAuthenticatedRead(
+            Owner(id='test:tester', name='test:tester'),
+            s3_acl=self.s3_acl,
+            allow_no_owner=self.allow_no_owner)
 
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'WRITE'))
@@ -130,7 +136,9 @@ class TestS3Subresource(unittest.TestCase):
     def test_acl_bucket_owner_read(self):
         acl = ACLBucketOwnerRead(
             bucket_owner=Owner('test:tester2', 'test:tester2'),
-            object_owner=Owner('test:tester', 'test:tester'))
+            object_owner=Owner('test:tester', 'test:tester'),
+            s3_acl=self.s3_acl,
+            allow_no_owner=self.allow_no_owner)
 
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'WRITE'))
@@ -146,7 +154,9 @@ class TestS3Subresource(unittest.TestCase):
     def test_acl_bucket_owner_full_control(self):
         acl = ACLBucketOwnerFullControl(
             bucket_owner=Owner('test:tester2', 'test:tester2'),
-            object_owner=Owner('test:tester', 'test:tester'))
+            object_owner=Owner('test:tester', 'test:tester'),
+            s3_acl=self.s3_acl,
+            allow_no_owner=self.allow_no_owner)
 
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'WRITE'))
@@ -159,8 +169,10 @@ class TestS3Subresource(unittest.TestCase):
                                               'WRITE_ACP'))
 
     def test_acl_elem(self):
-        acl = ACLPrivate(Owner(id='test:tester',
-                               name='test:tester'))
+        acl = ACLPrivate(
+            Owner(id='test:tester', name='test:tester'),
+            s3_acl=self.s3_acl,
+            allow_no_owner=self.allow_no_owner)
         elem = acl.elem()
         self.assertTrue(elem.find('./Owner') is not None)
         self.assertTrue(elem.find('./AccessControlList') is not None)
@@ -172,10 +184,12 @@ class TestS3Subresource(unittest.TestCase):
 
     def test_acl_from_elem(self):
         # check translation from element
-        acl = ACLPrivate(Owner(id='test:tester',
-                               name='test:tester'))
+        acl = ACLPrivate(
+            Owner(id='test:tester', name='test:tester'),
+            s3_acl=self.s3_acl,
+            allow_no_owner=self.allow_no_owner)
         elem = acl.elem()
-        acl = ACL.from_elem(elem)
+        acl = ACL.from_elem(elem, self.s3_acl, self.allow_no_owner)
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'WRITE'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ_ACP'))
@@ -188,10 +202,12 @@ class TestS3Subresource(unittest.TestCase):
                                                'WRITE_ACP'))
 
     def test_acl_from_elem_by_id_only(self):
-        elem = ACLPrivate(Owner(id='test:tester',
-                                name='test:tester')).elem()
+        elem = ACLPrivate(
+            Owner(id='test:tester', name='test:tester'),
+            s3_acl=self.s3_acl,
+            allow_no_owner=self.allow_no_owner).elem()
         elem.find('./Owner').remove(elem.find('./Owner/DisplayName'))
-        acl = ACL.from_elem(elem)
+        acl = ACL.from_elem(elem, self.s3_acl, self.allow_no_owner)
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'WRITE'))
         self.assertTrue(self.check_permission(acl, 'test:tester', 'READ_ACP'))
@@ -210,7 +226,7 @@ class TestS3Subresource(unittest.TestCase):
                         'Grantee': 'test:tester'}]}
         headers = {sysmeta_header('container', 'acl'):
                    json.dumps(access_control_policy)}
-        acl = decode_acl('container', headers)
+        acl = decode_acl('container', headers, self.allow_no_owner)
 
         self.assertEqual(type(acl), ACL)
         self.assertEqual(acl.owner.id, 'test:tester')
@@ -225,7 +241,7 @@ class TestS3Subresource(unittest.TestCase):
                         'Grantee': 'test:tester'}]}
         headers = {sysmeta_header('object', 'acl'):
                    json.dumps(access_control_policy)}
-        acl = decode_acl('object', headers)
+        acl = decode_acl('object', headers, self.allow_no_owner)
 
         self.assertEqual(type(acl), ACL)
         self.assertEqual(acl.owner.id, 'test:tester')
@@ -235,7 +251,7 @@ class TestS3Subresource(unittest.TestCase):
 
     def test_decode_acl_undefined(self):
         headers = {}
-        acl = decode_acl('container', headers)
+        acl = decode_acl('container', headers, self.allow_no_owner)
 
         self.assertEqual(type(acl), ACL)
         self.assertIsNone(acl.owner.id)
@@ -243,14 +259,15 @@ class TestS3Subresource(unittest.TestCase):
 
     def test_decode_acl_empty_list(self):
         headers = {sysmeta_header('container', 'acl'): '[]'}
-        acl = decode_acl('container', headers)
+        acl = decode_acl('container', headers, self.allow_no_owner)
         self.assertEqual(type(acl), ACL)
         self.assertIsNone(acl.owner.id)
         self.assertEqual(len(acl.grants), 0)
 
     def test_decode_acl_with_invalid_json(self):
         headers = {sysmeta_header('container', 'acl'): '['}
-        self.assertRaises(InvalidSubresource, decode_acl, 'container', headers)
+        self.assertRaises(InvalidSubresource, decode_acl, 'container',
+                          headers, self.allow_no_owner)
 
     def test_encode_acl_container(self):
         acl = ACLPrivate(Owner(id='test:tester',

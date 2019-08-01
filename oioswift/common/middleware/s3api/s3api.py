@@ -55,7 +55,7 @@ following for an SAIO setup::
 from paste.deploy import loadwsgi
 
 from swift.common.utils import get_logger, \
-    register_swift_info
+    register_swift_info, config_true_value, config_positive_int_value
 from swift.common.wsgi import PipelineWrapper, loadcontext
 
 from oioswift.common.middleware.s3api.exception import NotS3Request
@@ -63,24 +63,66 @@ from oioswift.common.middleware.s3api.request import get_request_class
 from oioswift.common.middleware.s3api.response import ErrorResponse, \
     InternalError, MethodNotAllowed, ResponseBase
 from oioswift.common.middleware.s3api.bucket_db import get_bucket_db
-from oioswift.common.middleware.s3api.cfg import CONF
+from oioswift.common.middleware.s3api.cfg import Config
 from oioswift.common.middleware.s3api.utils import LOGGER
+from oioswift.common.middleware.s3api.acl_handlers import get_acl_handler
 
 
 class S3Middleware(object):
     """S3 compatibility middleware"""
     def __init__(self, app, conf, *args, **kwargs):
         self.app = app
-        self.slo_enabled = conf['allow_multipart_uploads']
-        self.check_pipeline(conf)
-        self.bucket_db = get_bucket_db(conf)
+        self.conf = Config()
+        self.conf.allow_no_owner = config_true_value(
+            conf.get('allow_no_owner', False))
+        self.conf.location = conf.get('location', 'US')
+        self.conf.dns_compliant_bucket_names = config_true_value(
+            conf.get('dns_compliant_bucket_names', True))
+        self.conf.max_bucket_listing = config_positive_int_value(
+            conf.get('max_bucket_listing', 1000))
+        self.conf.max_parts_listing = config_positive_int_value(
+            conf.get('max_parts_listing', 1000))
+        self.conf.max_multi_delete_objects = config_positive_int_value(
+            conf.get('max_multi_delete_objects', 1000))
+        self.conf.multi_delete_concurrency = config_positive_int_value(
+            conf.get('multi_delete_concurrency', 2))
+        self.conf.s3_acl = config_true_value(
+            conf.get('s3_acl', False))
+        self.conf.s3_acl_inherit = config_true_value(
+            conf.get('s3_acl_inherit', False))
+        self.conf.s3_acl_openbar = config_true_value(
+            conf.get('s3_acl_openbar', False))
+        self.conf.storage_domain = conf.get('storage_domain', '')
+        self.conf.auth_pipeline_check = config_true_value(
+            conf.get('auth_pipeline_check', True))
+        self.conf.max_upload_part_num = config_positive_int_value(
+            conf.get('max_upload_part_num', 1000))
+        self.conf.check_bucket_owner = config_true_value(
+            conf.get('check_bucket_owner', False))
+        self.conf.force_swift_request_proxy_log = config_true_value(
+            conf.get('force_swift_request_proxy_log', False))
+        self.conf.allow_multipart_uploads = config_true_value(
+            conf.get('allow_multipart_uploads', True))
+        self.conf.min_segment_size = config_positive_int_value(
+            self.conf.get('min_segment_size', 5242880))
+        self.conf.allow_anonymous_path_request = config_true_value(
+            self.conf.get('allow_anonymous_path_request', True)
+        )
+        self.slo_enabled = self.conf.allow_multipart_uploads
+        self.check_pipeline(self.conf)
+        self.bucket_db = get_bucket_db(self.conf)
 
     def __call__(self, env, start_response):
         try:
             if self.bucket_db:
                 env['swift3.bucket_db'] = self.bucket_db
-            req_class = get_request_class(env)
-            req = req_class(env, self.app, self.slo_enabled)
+            req_class = get_request_class(env, self.conf.s3_acl)
+            req = req_class(
+                env, self.app, self.slo_enabled, self.conf.storage_domain,
+                self.conf.location, self.conf.force_swift_request_proxy_log,
+                self.conf.dns_compliant_bucket_names,
+                self.conf.allow_multipart_uploads,
+                self.conf.allow_anonymous_path_request)
             resp = self.handle_request(req)
         except NotS3Request:
             resp = self.app
@@ -100,9 +142,11 @@ class S3Middleware(object):
 
     def handle_request(self, req):
         LOGGER.debug('Calling S3 Middleware')
-        LOGGER.debug(req.__dict__)
 
-        controller = req.controller(self.app)
+        controller = req.controller(self.app, self.conf)
+        acl_handler = get_acl_handler(req.controller_name)(req, self.conf)
+        req.set_acl_handler(acl_handler)
+
         if hasattr(controller, req.method):
             handler = getattr(controller, req.method)
             if not getattr(handler, 'publicly_accessible', False):
@@ -180,23 +224,25 @@ def check_filter_order(pipeline, required_filters):
 
 def filter_factory(global_conf, **local_conf):
     """Standard filter factory to use the middleware with paste.deploy"""
-    CONF.update(global_conf)
-    CONF.update(local_conf)
+    conf = global_conf.copy()
+    conf.update(local_conf)
 
     # Reassign config to logger
     global LOGGER
-    LOGGER = get_logger(CONF, log_route=CONF.get('log_name', 's3api'))
+    LOGGER = get_logger(conf, log_route=conf.get('log_name', 's3api'))
 
     register_swift_info(
         's3api',
-        max_bucket_listing=CONF['max_bucket_listing'],
-        max_parts_listing=CONF['max_parts_listing'],
-        max_upload_part_num=CONF['max_upload_part_num'],
-        max_multi_delete_objects=CONF['max_multi_delete_objects'],
-        allow_multipart_uploads=CONF['allow_multipart_uploads'],
+        max_bucket_listing=conf.get('max_bucket_listing', 1000),
+        max_parts_listing=conf.get('max_parts_listing', 1000),
+        max_upload_part_num=conf.get('max_upload_part_num', 1000),
+        max_multi_delete_objects=conf.get('max_multi_delete_objects', 1000),
+        allow_multipart_uploads=conf.get('allow_multipart_uploads', True),
+        min_segment_size=conf.get('min_segment_size', 5242880),
+        s3_acl=conf.get('s3_acl', False),
     )
 
     def s3api_filter(app):
-        return S3Middleware(app, CONF)
+        return S3Middleware(app, conf)
 
     return s3api_filter

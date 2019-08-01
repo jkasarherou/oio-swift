@@ -28,9 +28,9 @@ from swift.common.utils import get_logger, parse_content_type
 from swift.common import utils
 from swift.common.swob import HTTPPreconditionFailed
 
-from oioswift.common.middleware.s3api.cfg import CONF
+from oioswift.common.middleware.s3api.cfg import XXX
 
-LOGGER = get_logger(CONF, log_route='s3api')
+LOGGER = get_logger(XXX, log_route='s3api')
 
 MULTIUPLOAD_SUFFIX = '+segments'
 
@@ -120,22 +120,22 @@ def is_valid_ipv6(ip):
     return True
 
 
-def validate_bucket_name(name):
+def validate_bucket_name(name, dns_compliant_bucket_names):
     """
     Validates the name of the bucket against S3 criteria,
     http://docs.amazonwebservices.com/AmazonS3/latest/BucketRestrictions.html
     True is valid, False is invalid.
     """
     valid_chars = '-.a-z0-9'
-    if not CONF.dns_compliant_bucket_names:
+    if not dns_compliant_bucket_names:
         valid_chars += 'A-Z_'
-    max_len = 63 if CONF.dns_compliant_bucket_names else 255
+    max_len = 63 if dns_compliant_bucket_names else 255
 
     if len(name) < 3 or len(name) > max_len or not name[0].isalnum():
         # Bucket names should be between 3 and 63 (or 255) characters long
         # Bucket names must start with a letter or a number
         return False
-    elif CONF.dns_compliant_bucket_names and (
+    elif dns_compliant_bucket_names and (
             '.-' in name or '-.' in name or '..' in name or
             not name[-1].isalnum()):
         # Bucket names cannot contain dashes next to periods

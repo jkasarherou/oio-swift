@@ -68,7 +68,6 @@ from oioswift.common.middleware.s3api.utils import LOGGER, unique_id, \
     MULTIUPLOAD_SUFFIX, S3Timestamp, extract_s3_etag, sysmeta_header
 from oioswift.common.middleware.s3api.etree import Element, SubElement, \
     fromstring, tostring, XMLSyntaxError, DocumentInvalid
-from oioswift.common.middleware.s3api.cfg import CONF
 
 DEFAULT_MAX_PARTS_LISTING = 1000
 DEFAULT_MAX_UPLOADS = 1000
@@ -109,11 +108,11 @@ class PartController(Controller):
         """
         try:
             part_number = int(req.params['partNumber'])
-            if part_number < 1 or CONF.max_upload_part_num < part_number:
+            if part_number < 1 or self.conf.max_upload_part_num < part_number:
                 raise Exception()
         except Exception:
             err_msg = 'Part number must be an integer between 1 and %d,' \
-                      ' inclusive' % CONF.max_upload_part_num
+                      ' inclusive' % self.conf.max_upload_part_num
             raise InvalidArgument('partNumber', req.params['partNumber'],
                                   err_msg)
         return part_number
@@ -475,9 +474,9 @@ class UploadController(Controller):
         _check_upload_info(req, self.app, upload_id)
 
         maxparts = req.get_validated_param(
-            'max-parts', DEFAULT_MAX_PARTS_LISTING, CONF.max_parts_listing)
-        part_num_marker = req.get_validated_param(
-            'part-number-marker', 0)
+            'max-parts', DEFAULT_MAX_PARTS_LISTING,
+            self.conf.max_parts_listing)
+        part_num_marker = req.get_validated_param('part-number-marker', 0)
 
         query = {
             'format': 'json',
@@ -655,13 +654,13 @@ class UploadController(Controller):
         headers['X-Object-Sysmeta-Container-Update-Override-Etag'] = c_etag
 
         too_small_message = ('s3api requires that each segment be at least '
-                             '%d bytes' % CONF.min_segment_size)
+                             '%d bytes' % self.conf.min_segment_size)
 
         def size_checker(manifest):
             return [
                 (item['name'], too_small_message)
                 for item in manifest[:-1]
-                if item and item['bytes'] < CONF.min_segment_size]
+                if item and item['bytes'] < self.conf.min_segment_size]
 
         req.environ['swift.callback.slo_manifest_hook'] = size_checker
 

@@ -19,19 +19,9 @@ from swift.common.swob import Request
 
 from tests.unit.common.middleware.s3api import S3TestCase
 from oioswift.common.middleware.s3api.etree import fromstring
-from oioswift.common.middleware.s3api.cfg import CONF
 
 
 class TestS3Location(S3TestCase):
-
-    def setUp(self):
-        super(TestS3Location, self).setUp()
-        # allow to change location config in test code
-        self.orig_loc = CONF.location
-
-    def tearDown(self):
-        CONF.location = self.orig_loc
-
     def test_object_location(self):
         req = Request.blank('/bucket?location',
                             environ={'REQUEST_METHOD': 'GET'},
@@ -44,7 +34,7 @@ class TestS3Location(S3TestCase):
         self.assertIsNone(location)
 
     def test_object_location_setting_as_us_west_1(self):
-        CONF.location = 'us-west-1'
+        self.s3api.conf.location = 'us-west-1'
         req = Request.blank('/bucket?location',
                             environ={'REQUEST_METHOD': 'GET'},
                             headers={'Authorization': 'AWS test:tester:hmac',

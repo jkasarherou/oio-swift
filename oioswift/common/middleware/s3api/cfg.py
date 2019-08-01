@@ -55,7 +55,7 @@ class Config(dict):
 
 
 # Global config dictionary.  The default values can be defined here.
-CONF = Config({
+XXX = Config({
     'allow_no_owner': False,
     'location': 'US',
     'dns_compliant_bucket_names': True,
@@ -73,5 +73,5 @@ CONF = Config({
     'force_swift_request_proxy_log': False,
     'allow_multipart_uploads': True,
     'min_segment_size': 5242880,
-    'allow_anymous_path_request': True
+    'allow_anonymous_path_request': True
 })

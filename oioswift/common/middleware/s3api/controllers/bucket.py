@@ -31,7 +31,6 @@ from oioswift.common.middleware.s3api.response import HTTPOk, \
     InvalidLocationConstraint, NoSuchBucket, BucketNotEmpty, InternalError, \
     ServiceUnavailable, NoSuchKey, CORSForbidden, \
     CORSInvalidAccessControlRequest, CORSOriginMissing
-from oioswift.common.middleware.s3api.cfg import CONF
 from oioswift.common.middleware.s3api.utils import LOGGER, \
     MULTIUPLOAD_SUFFIX, VERSIONING_SUFFIX, extract_s3_etag
 
@@ -102,10 +101,11 @@ class BucketController(Controller):
         Handle GET Bucket (List Objects) request
         """
 
-        max_keys = req.get_validated_param('max-keys', CONF.max_bucket_listing)
+        max_keys = req.get_validated_param(
+            'max-keys', self.conf.max_bucket_listing)
         # TODO: Separate max_bucket_listing and default_bucket_listing
         tag_max_keys = max_keys
-        max_keys = min(max_keys, CONF.max_bucket_listing)
+        max_keys = min(max_keys, self.conf.max_bucket_listing)
 
         encoding_type = req.params.get('encoding-type')
         if encoding_type is not None and encoding_type != 'url':
@@ -328,7 +328,7 @@ class BucketController(Controller):
                 LOGGER.error(e)
                 raise
 
-            if location != CONF.location:
+            if location != self.conf.location:
                 # s3api cannot support multiple regions currently.
                 raise InvalidLocationConstraint()
 
@@ -344,7 +344,7 @@ class BucketController(Controller):
         """
         Handle DELETE Bucket request
         """
-        if CONF.allow_multipart_uploads:
+        if self.conf.allow_multipart_uploads:
             self._delete_segments_bucket(req)
         resp = req.get_response(self.app)
         return resp

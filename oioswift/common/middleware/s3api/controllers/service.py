@@ -22,7 +22,6 @@ from oioswift.common.middleware.s3api.response import HTTPOk, AccessDenied, \
     NoSuchBucket
 from oioswift.common.middleware.s3api.utils import validate_bucket_name, \
     S3Timestamp
-from oioswift.common.middleware.s3api.cfg import CONF
 
 
 class ServiceController(Controller):
@@ -39,7 +38,9 @@ class ServiceController(Controller):
         containers = json.loads(resp.body)
 
         containers = filter(
-            lambda item: validate_bucket_name(item['name']), containers)
+            lambda item: validate_bucket_name(
+                item['name'], self.conf.dns_compliant_bucket_names),
+            containers)
 
         # we don't keep the creation time of a bucket (s3cmd doesn't
         # work without that) so we use something bogus.
@@ -56,7 +57,7 @@ class ServiceController(Controller):
                 creation_date = S3Timestamp(ts).s3xmlformat
             else:
                 creation_date = '2009-02-03T16:45:09.000Z'
-            if CONF.s3_acl and CONF.check_bucket_owner:
+            if self.conf.s3_acl and self.conf.check_bucket_owner:
                 try:
                     c_resp = req.get_response(self.app, 'HEAD', c['name'])
                     if 'X-Timestamp' in c_resp.sw_headers:
