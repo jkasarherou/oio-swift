@@ -121,8 +121,15 @@ class FakeSwift(object):
             method == 'PUT' and
             'X-Copy-From' in req.headers and
             'Range' in req.headers)
-        resp = resp_class(req=req, headers=headers, body=body,
-                          conditional_response=support_range_and_conditional)
+
+        app_iter = None
+        if isinstance(body, list):
+            app_iter = body
+            body = None
+
+        resp = resp_class(
+            req=req, headers=headers, body=body, app_iter=app_iter,
+            conditional_response=support_range_and_conditional)
         return resp(env, start_response)
 
     @property
@@ -140,8 +147,7 @@ class FakeSwift(object):
     def register(self, method, path, response_class, headers, body):
         # assuming the path format like /v1/account/container/object
         resource_map = ['account', 'container', 'object']
-        acos = filter(None, split_path(path, 0, 4, True)[1:])
-        index = len(acos) - 1
+        index = len(list(filter(None, split_path(path, 0, 4, True)[1:]))) - 1
         resource = resource_map[index]
         if (method, path) in self._responses:
             old_headers = self._responses[(method, path)][1]
@@ -151,6 +157,8 @@ class FakeSwift(object):
                     # keep old sysmeta for s3acl
                     headers.update({key: value})
 
+        if body is not None and not isinstance(body, (bytes, list)):
+            body = body.encode('utf-8')
         self._responses[(method, path)] = (response_class, headers, body)
 
     def clear_calls(self):
